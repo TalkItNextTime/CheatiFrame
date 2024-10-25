@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.11.35208.52
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CheatiFrame", "CheatiFrame.vcxproj", "{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Debug|x64.ActiveCfg = Debug|x64
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Debug|x64.Build.0 = Debug|x64
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Debug|x86.ActiveCfg = Debug|Win32
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Debug|x86.Build.0 = Debug|Win32
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Release|x64.ActiveCfg = Release|x64
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Release|x64.Build.0 = Release|x64
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Release|x86.ActiveCfg = Release|Win32
+		{BCC31A68-EB62-44DE-B6C4-F105771D4BEC}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {12381030-A88D-4997-9752-84D72840500F}
+	EndGlobalSection
+EndGlobal
