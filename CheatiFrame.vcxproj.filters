@@ -48,6 +48,9 @@
     <ClInclude Include="Visuals\Menu.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\Offsets.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ImGui\imgui.cpp">
@@ -81,6 +84,12 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Visuals\Menu.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Math\Vector.h">
+      <Filter>头文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\AlgorAim.h">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

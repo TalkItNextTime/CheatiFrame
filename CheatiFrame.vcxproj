@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -130,6 +130,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Cheats\Cheats.h" />
+    <ClInclude Include="Cheats\Offsets.h" />
     <ClInclude Include="ImGui\imconfig.h" />
     <ClInclude Include="ImGui\imgui.h" />
     <ClInclude Include="ImGui\imgui_impl_dx11.h" />
@@ -142,6 +143,7 @@
     <ClInclude Include="Visuals\Menu.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Cheats\AlgorAim.h" />
     <ClCompile Include="Cheats\Cheats.cpp" />
     <ClCompile Include="ImGui\imgui.cpp" />
     <ClCompile Include="ImGui\imgui_demo.cpp" />
@@ -151,6 +153,7 @@
     <ClCompile Include="ImGui\imgui_tables.cpp" />
     <ClCompile Include="ImGui\imgui_widgets.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Math\Vector.h" />
     <ClCompile Include="Visuals\External.cpp" />
     <ClCompile Include="Visuals\Menu.cpp" />
   </ItemGroup>
