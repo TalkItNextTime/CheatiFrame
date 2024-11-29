@@ -49,6 +49,8 @@ namespace Cheats
 		float tem_distance_to_crosshair = 99999.f;//人物与准心之间的距离
 		float distance_to_crosshair = 0.f;
 		Vector recoilPos;
+		Vector aim_punch;
+		int crosshair_ent=-1;
 
 		bool CheatInit(); //初始化
 		void CheatLoop(); //遍历
@@ -111,6 +113,7 @@ namespace Cheats
 	void DrawFov();												//绘制自瞄范围
 	void DrawBones();											//绘制骨骼
 	void ConnectBones(int begin,int end);						//绘制骨骼连线
+	void DrawCross();											//绘制准心
 
 	//自瞄
 	void EnterAimQueue();										//进入自瞄队列
@@ -119,7 +122,8 @@ namespace Cheats
 	void TriggerBot();											//扳机
 	int getShots();												//获取开火状态
 	Vector getAimPunch();										//获取后座
-	void recoilCompensation();									//后座补偿
+	void recoilCompensation();									//后座补偿计算
+	void recoilMove(float x,float y);							//后座补偿鼠标移动
 	int getiIDEntIndex();										//获取准心瞄准信息
 
 	//void algorAim(Vector targetPos, float& currentMousePositionX, float& currentMousePositionY);											//算法自瞄

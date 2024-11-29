@@ -2,11 +2,15 @@
 
 #define PI 3.14159265358979323846
 
+
+
 	void Cheats::CheatMain()
 	{
 		//获取当下时间
 		static std::chrono::time_point time1 = std::chrono::steady_clock::now();
 		auto time2 = std::chrono::steady_clock::now();
+
+		
 		//time2 - time1 >= std::chrono::milliseconds(500)
 
 		if (GetAsyncKeyState(VK_INSERT) && time2 - time1 >= std::chrono::milliseconds(200))//菜单呼出热键
@@ -22,6 +26,11 @@
 			Menu::ShowMenu();
 		}
 
+		if (GetAsyncKeyState(VK_END) & 0x8000)
+		{
+			exit(0);
+		}
+
 		//功能函数调用
 		//初始化一次
 		static bool b = true;
@@ -31,6 +40,8 @@
 				return;
 			b = !b;
 		}
+
+		 
 
 		Cheats::gameName.CheatLoop();
 
@@ -69,8 +80,11 @@
 
 	void Cheats::Game::CheatLoop() //遍历信息
 	{
+		static std::chrono::time_point time1 = std::chrono::steady_clock::now();
+		auto time2 = std::chrono::steady_clock::now();
 		//遍历所有人
-		for (int i = 0; i < 32; i++)
+		
+		for (int i = 0; i < 64; i++)
 		{
 			if (!UpdateLocalInfo())										//更新本地玩家信息
 				return;
@@ -87,12 +101,8 @@
 			if (!UpdateBones())											//更新骨骼坐标
 				continue;
 
-			recoilCompensation();										//后座补偿
-
 			EnterAimQueue();											//进入自瞄队列
-
-			if (Menu::aim扳机)											//扳机
-				TriggerBot();												
+			
 
 			if (Menu::util绘制总开关 && Menu::vis绘制骨骼)				//绘制骨骼
 				DrawBones();
@@ -109,16 +119,44 @@
 			if (Menu::util绘制总开关 && Menu::vis绘制距离)				//绘制距离
 				DrawDistance();
 
+
+				
 			
 
 		}
+		crosshair_ent = getiIDEntIndex();
 		//printf("switchTarget: %d \r\n", Menu::switchTarget);
 		GetTargetInfo();
+
+		//printf("aim_punch: %f  %f\r\n", aim_punch.x, aim_punch.y);
+		//printf("recoilPos: %f  %f\r\n", recoilPos.x, recoilPos.y);
+
+		recoilCompensation();
 		if (Menu::util绘制总开关 && Menu::aim绘制FOV)					//绘制FOV
 			DrawFov();
-		if (Menu::aim自瞄 && GetAsyncKeyState(VK_XBUTTON2) & 0x8000 && target_info.dis2Cross <= Menu::aimbotFOV)
-			Aimbot();												   //自瞄
-
+		if (Menu::aim扳机 && GetAsyncKeyState(Menu::triggerKey) && !Menu::DisplayToggle)//扳机
+			TriggerBot();
+									
+		if (Menu::aim自瞄 && GetAsyncKeyState(Menu::aimKey) & 0x8000 && target_info.dis2Cross <= Menu::aimbotFOV && !Menu::DisplayToggle)
+			Aimbot();													//自瞄
+		if (Menu::vis绘制准心)
+			DrawCross();												//准心
+		if (crosshair_ent && crosshair_ent != -1)
+		{
+			char buff[256];
+			sprintf_s(buff, u8"准心id:%d 可以射击", crosshair_ent);
+			ImGui::GetBackgroundDrawList()->AddText({ Visual::external.gamewindow.size.x / 2 - 120,150 }, ImColor(255, 0, 0), buff);
+			ImGui::GetBackgroundDrawList()->AddCircleFilled({ Visual::external.gamewindow.size.x / 2,200 }, 10, ImColor(255, 0, 0));
+		}
+		//if (GetAsyncKeyState(VK_LBUTTON)) 
+		//{
+		//	Vector aim_punch = getAimPunch();
+		//	printf("aim_punch: %f  %f\r\n", aim_punch.x, aim_punch.y);
+		//}
+		//if (Menu::aim后座补偿 && GetAsyncKeyState(VK_LBUTTON) && getShots())
+		//{
+		//	recoilMove(recoilPos.x, recoilPos.y);						//补偿压枪
+		//}
 	}
 
 
@@ -216,7 +254,14 @@
 			return false;
 
 		//可见性
-		player.spotted = Read<bool>(player.pAddr + offsets::m_entitySpottedState +0x08);
+		if (Menu::util可视检查)
+		{
+			player.spotted = Read<bool>(player.pAddr + offsets::m_entitySpottedState + 0x08);
+		}
+		else
+		{
+			player.spotted = true;
+		}
 
 		//血量
 		player.health = Read<int>(player.pAddr + offsets::m_iHealth);
@@ -426,7 +471,8 @@
 	{
 		char buff[256];
 		sprintf_s(buff, "%.f m", player.dis2LP / 75.f);
-		ImGui::GetBackgroundDrawList()->AddText({ (player.ESP1.x + player.ESP2.x) / 2.05f,player.ESP2.y }, ImColor(255, 255, 255), buff);
+		if (InScreen((player.ESP1.x + player.ESP2.x) / 2.05f, player.ESP2.y))
+			ImGui::GetBackgroundDrawList()->AddText({ (player.ESP1.x + player.ESP2.x) / 2.05f,player.ESP2.y }, ImColor(255, 255, 255), buff);
 	}
 
 	void Cheats::Game::DrawFov()
@@ -479,6 +525,16 @@
 		}
 	}
 
+	void Cheats::Game::DrawCross()
+	{
+		Vector cross = GetCross();
+
+		
+		ImGui::GetBackgroundDrawList()->AddLine({ cross.x - 10,cross.y }, { cross.x + 10,cross.y }, ImColor(255, 0, 0));
+		ImGui::GetBackgroundDrawList()->AddLine({ cross.x,cross.y - 10 }, { cross.x ,cross.y + 10 }, ImColor(255, 0, 0));
+		
+	}
+
 	void Cheats::Game::EnterAimQueue()
 	{
 		//if (Menu::aim自瞄 && GetAsyncKeyState(VK_XBUTTON2) & 0x8000)
@@ -526,8 +582,11 @@
 
 	void Cheats::Game::Aimbot()
 	{
+
 		if (target_info.pAddr != NULL && target_info.spotted)
 		{
+
+
 			////以需要自瞄的骨骼点xyz和自己摄像机xyz来计算俯仰角和偏航角
 			//float temp_x = target_info.WorldBoneArr[Menu::AimLocation].x - player.origin.x;
 			//float temp_y = target_info.WorldBoneArr[Menu::AimLocation].y - player.origin.y;
@@ -535,10 +594,13 @@
 			Vector cross = GetCross();
 			float new_x = 0.f;
 			float new_y = 0.f;
-			if (getShots() > 1)
+			
+			if (Menu::aim后座补偿 && !Menu::DisplayToggle && getShots() > 1)
 			{
-				new_x = target_info.ScreenBoneArr[Menu::AimLocation].x - recoilPos.x + 5;
-				new_y = target_info.ScreenBoneArr[Menu::AimLocation].y - recoilPos.y + 60;
+
+				
+				new_x = target_info.ScreenBoneArr[Menu::AimLocation].x - recoilPos.x + Menu::recoil_X;
+				new_y = target_info.ScreenBoneArr[Menu::AimLocation].y - recoilPos.y + Menu::recoil_Y;
 			}
 			else
 			{
@@ -552,7 +614,7 @@
 			float currentMousePositionY = 0.0f; // 假设当前鼠标位置为0
 
 			// 调用更新鼠标位置的函数
-			updateMousePosition(new_x, new_y, new_x, new_y, currentMousePositionX, currentMousePositionY);
+			SpringAlgo(new_x, new_y, new_x, new_y, currentMousePositionX, currentMousePositionY, Menu::SPRING_CONSTANT, Menu::DAMPING_CONSTANT, Menu::GRAVITY_CONSTANT, Menu::MASS);
 
 			// 发送鼠标移动事件
 			mouse_event(MOUSEEVENTF_MOVE, static_cast<LONG>(currentMousePositionX), static_cast<LONG>(currentMousePositionY), 0, 0);
@@ -581,25 +643,53 @@
 
 	void Cheats::Game::TriggerBot()
 	{
-		/*static std::chrono::time_point time1 = std::chrono::steady_clock::now();
-		auto time2 = std::chrono::steady_clock::now();*/
-		int crosshair_ent = getiIDEntIndex();
-		//printf("getiIDEntIndex:%d\r\n", crosshair_ent);
-		//printf("attack code: %d\r\n", Read<int>(client + offsets::attack));
-		if (GetAsyncKeyState(VK_XBUTTON2) && crosshair_ent && crosshair_ent != -1)
+		if (crosshair_ent && crosshair_ent != -1)
 		{
-			Write<int>(client + offsets::attack, 65537);
+
+			std::uintptr_t list_entry = Read<std::uintptr_t>(entityList + 0x8 * (crosshair_ent >> 9) + 0x10);
+			if (!list_entry)
+			{
+				std::cout << "[-] List entry invalid\n";
+				return;
+			}
+			const auto entity_pawn = Read<std::uintptr_t>(list_entry + 120 * (crosshair_ent & 0x1FF));
+			if (!entity_pawn)
+			{
+				std::cout << "[-] Entity pawn is invalid\n";
+				return;
+			}
+			int entity_team = Read<int>(entity_pawn + offsets::m_iTeamNum);
+			//printf("准心人物阵营：%d\r\n", entity_team);
+			if (Menu::util判断阵营 && pLocal.team == entity_team)
+				return;
+
+			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);//模拟鼠标单击
+			//Write<int>(client + offsets::attack, 65537);
 			//if (time2 - time1 >= std::chrono::milliseconds(1000))
 			//{
 			//	Write<int>(client + offsets::attack, 16777472);
 			//}
 		}
-		else
+		if (crosshair_ent == -1)
 		{
-			Write<int>(client + offsets::attack, 16777472);
+			//Write<int>(client + offsets::attack, 16777472);
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 		}
+		else
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);	
 
-		
+			//printf("getiIDEntIndex:%d\r\n", crosshair_ent);
+			//printf("attack code: %d\r\n", Read<int>(client + offsets::attack));
+			//recoilCompensation();
+			//if (recoilPos.y < 528.f && recoilPos.y != 0)
+			//{
+			//	mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+			//	return;
+			//}
+
+			
+			
+
 	}
 
 	int Cheats::Game::getShots()
@@ -617,10 +707,11 @@
 	{
 		if (getShots() > 1)
 		{
-			Vector aim_punch = getAimPunch();
+			aim_punch = getAimPunch();
+			//printf("aim_punch: %f  %f\r\n", aim_punch.x, aim_punch.y);
 			recoilPos = GetCross();
 
-			const float alpha = 0.9;//缓动系数
+			const float alpha = 0.8;//缓动系数
 
 			recoilPos.x = recoilPos.x * (1 - alpha) + (GetCross().x - aim_punch.y * 10) * alpha;
 			recoilPos.y = recoilPos.y * (1 - alpha) + (GetCross().y + aim_punch.x * 10) * alpha;
@@ -629,7 +720,40 @@
 
 			ImGui::GetBackgroundDrawList()->AddCircleFilled({ recoilPos.x - 2,recoilPos.y - 2 }, 6, ImColor(255, 255, 0));
 		}
+		else
+		{
+			recoilPos.x = 0;
+			recoilPos.y = 0;
+		}
 
+	}
+
+	void Cheats::Game::recoilMove(float x, float y)
+	{
+		if (Menu::aim后座补偿 && getShots())
+			recoilCompensation();
+
+		
+
+		Vector cross = GetCross();
+		// 将新的算法集成进来
+		float currentMousePositionX = 0.0f; // 假设当前鼠标位置为0
+		float currentMousePositionY = 0.0f; // 假设当前鼠标位置为0
+
+		float new_x = cross.x - recoilPos.x + Menu::recoil_X;
+		float new_y = cross.y - recoilPos.y + Menu::recoil_X;
+
+		// 调用更新鼠标位置的函数
+		SpringAlgo(new_x, new_y, new_x, new_y, currentMousePositionX, currentMousePositionY,
+			120.f/*弹簧刚度*/,
+			150.f/*阻尼*/,
+			5.f/*引力常数*/,
+			50.f/*质量*/);
+		//printf("currentMousePosition:%f  %f  \r\n", currentMousePositionX, currentMousePositionY);
+		//printf("recoilPos:%f  %f  \r\n", recoilPos.x, recoilPos.y);
+		// 发送鼠标移动事件
+		mouse_event(MOUSEEVENTF_MOVE, static_cast<LONG>(currentMousePositionX), static_cast<LONG>(currentMousePositionY), 0, 0);
+		//ZeroMemory(&recoilPos, sizeof(recoilPos));
 	}
 
 	int Cheats::Game::getiIDEntIndex()
