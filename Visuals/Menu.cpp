@@ -112,6 +112,9 @@ void Menu::ShowMenu()
 			ImGui::SliderFloat(u8"鼠标质量（越大越慢）", &Menu::MASS, 5.f, 100.f, "%.1f");
 			ImGui::SliderFloat(u8"弹簧刚度（越大越快）", &Menu::SPRING_CONSTANT, 0.f, 3000.f, "%.1f");
 			ImGui::SliderFloat(u8"阻尼（越大失速越快）", &Menu::DAMPING_CONSTANT, 0.f, 1000.f, "%.1f");
+			ImGui::SliderInt(u8"读线程休眠(ms)", &Menu::read线程休眠毫秒, 1, 20, "%d");
+			ImGui::SliderInt(u8"ESP线程休眠(ms)", &Menu::esp线程休眠毫秒, 1, 30, "%d");
+			ImGui::SliderInt(u8"瞄准切换延时(ms)", &Menu::瞄准切换延时毫秒, 0, 1000, "%d");
 			//ImGui::SliderFloat(u8"引力", &Menu::GRAVITY_CONSTANT, 0.f, 20.f, "%.1f");
 
 
@@ -128,7 +131,7 @@ void Menu::ShowMenu()
 				Menu::helper请求同步手雷类型 = true;
 			}
 
-			static const char* grenadeTypes[] = { "Smoke", "Flash", "HE", "Decoy" };
+			static const char* grenadeTypes[] = { u8"烟雾弹", u8"闪光弹", u8"高爆雷", u8"诱饵弹", u8"燃烧弹" };
 			static const char* throwTypes[] = { u8"站投", u8"跳投", u8"跑投" };
 
 			ImGui::Checkbox(u8"启用投掷物辅助", &Menu::helper启用);

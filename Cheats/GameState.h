@@ -116,6 +116,9 @@ namespace Cheats
 		float spring = 400.0f;
 		float damping = 260.0f;
 		float gravity = 10.0f;
+		int readSleepMs = 2;
+		int espSleepMs = 4;
+		int aimRetargetDelayMs = 120;
 		bool helperEnabled = false;
 		bool helperFilterByWeapon = true;
 		bool helperDrawStand = true;

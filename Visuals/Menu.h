@@ -51,6 +51,9 @@ namespace Menu
 	inline float SPRING_CONSTANT = 400.0f;
 	inline float DAMPING_CONSTANT = 260.0f;
 	inline float GRAVITY_CONSTANT = 10.f;
+	inline int read线程休眠毫秒 = 2;
+	inline int esp线程休眠毫秒 = 4;
+	inline int 瞄准切换延时毫秒 = 120;
 
 	inline bool helper启用 = false;
 	inline bool helper按武器筛选 = true;

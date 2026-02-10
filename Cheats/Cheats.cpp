@@ -80,8 +80,40 @@ namespace
 		case 1: return "Flash";
 		case 2: return "HE";
 		case 3: return "Decoy";
+		case 4: return "Molotov";
 		default: return "Unknown";
 		}
+	}
+
+	const char* GrenadeTypeCnLabelByIndex(const int index)
+	{
+		switch (index)
+		{
+		case 0: return u8"烟雾弹";
+		case 1: return u8"闪光弹";
+		case 2: return u8"高爆雷";
+		case 3: return u8"诱饵弹";
+		case 4: return u8"燃烧弹";
+		default: return u8"未知";
+		}
+	}
+
+	std::string LocalizeGrenadeType(std::string grenadeType)
+	{
+		std::string lower = grenadeType;
+		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+		if (lower == "smoke")
+			return u8"烟雾弹";
+		if (lower == "flash")
+			return u8"闪光弹";
+		if (lower == "he")
+			return u8"高爆雷";
+		if (lower == "decoy")
+			return u8"诱饵弹";
+		if (lower == "molotov" || lower == "incendiary")
+			return u8"燃烧弹";
+		return grenadeType.empty() ? u8"未知" : grenadeType;
 	}
 
 	const char* ThrowTypeLabelByIndex(const int index)
@@ -106,6 +138,8 @@ namespace
 			return 2;
 		if (type == "decoy")
 			return 3;
+		if (type == "molotov" || type == "incendiary")
+			return 4;
 		return -1;
 	}
 
@@ -190,11 +224,12 @@ namespace
 	void ConnectBones(const EspPlayer& player, const ScreenSize& screen, int begin, int end)
 	{
 		Vector oldPoint{};
+		bool hasOldPoint = false;
 		for (int i = begin; i <= end; ++i)
 		{
 			if (player.screenBones[i].z > 0.0f && InScreen(screen, player.screenBones[i].x, player.screenBones[i].y))
 			{
-				if (i != begin)
+				if (hasOldPoint)
 				{
 					ImGui::GetBackgroundDrawList()->AddLine(
 						{ oldPoint.x, oldPoint.y },
@@ -202,6 +237,11 @@ namespace
 						ImColor(255, 255, 255));
 				}
 				oldPoint = { player.screenBones[i].x, player.screenBones[i].y };
+				hasOldPoint = true;
+			}
+			else
+			{
+				hasOldPoint = false;
 			}
 		}
 	}
@@ -461,7 +501,7 @@ namespace Cheats
 			if (typeIndex >= 0)
 			{
 				Menu::helper手动类型 = typeIndex;
-				Menu::helper状态 = std::string(u8"已自动识别手雷类型: ") + GrenadeTypeLabelByIndex(typeIndex);
+				Menu::helper状态 = std::string(u8"已自动识别手雷类型: ") + GrenadeTypeCnLabelByIndex(typeIndex);
 			}
 			else
 			{
@@ -564,6 +604,9 @@ namespace Cheats
 		snapshot.spring = Menu::SPRING_CONSTANT;
 		snapshot.damping = Menu::DAMPING_CONSTANT;
 		snapshot.gravity = Menu::GRAVITY_CONSTANT;
+		snapshot.readSleepMs = Menu::read线程休眠毫秒;
+		snapshot.espSleepMs = Menu::esp线程休眠毫秒;
+		snapshot.aimRetargetDelayMs = Menu::瞄准切换延时毫秒;
 		snapshot.helperEnabled = Menu::helper启用;
 		snapshot.helperFilterByWeapon = Menu::helper按武器筛选;
 		snapshot.helperDrawStand = Menu::helper绘制站位;
@@ -679,12 +722,13 @@ namespace Cheats
 
 			// Educational note: reading another process memory should only be used for learning.
 			SettingsSnapshot settings = SnapshotSettings();
+			const int readSleepMs = std::clamp(settings.readSleepMs, 1, 20);
 
 			RawState newRaw{};
 			newRaw.entityList = Read<uintptr_t>(client + offsets.dwEntityList);
 			if (!newRaw.entityList)
 			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				std::this_thread::sleep_for(std::chrono::milliseconds(readSleepMs));
 				continue;
 			}
 
@@ -694,7 +738,7 @@ namespace Cheats
 			std::uintptr_t localAddr = Read<uintptr_t>(client + offsets.dwLocalPlayerPawn);
 			if (!localAddr)
 			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				std::this_thread::sleep_for(std::chrono::milliseconds(readSleepMs));
 				continue;
 			}
 
@@ -816,7 +860,7 @@ namespace Cheats
 				shared.raw = newRaw;
 			}
 
-			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+			std::this_thread::sleep_for(std::chrono::milliseconds(readSleepMs));
 		}
 	}
 
@@ -830,6 +874,7 @@ namespace Cheats
 				break;
 
 			SettingsSnapshot settings = SnapshotSettings();
+			const int espSleepMs = std::clamp(settings.espSleepMs, 1, 30);
 
 			RawState raw{};
 			{
@@ -841,7 +886,7 @@ namespace Cheats
 			newEsp.screen = settings.screen;
 			if (settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
 			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(10));
+				std::this_thread::sleep_for(std::chrono::milliseconds(espSleepMs));
 				continue;
 			}
 
@@ -948,7 +993,7 @@ namespace Cheats
 				shared.esp = newEsp;
 			}
 
-			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+			std::this_thread::sleep_for(std::chrono::milliseconds(espSleepMs));
 		}
 	}
 
@@ -956,6 +1001,7 @@ namespace Cheats
 	void Game::AimWorker()
 	{
 		bool triggerHolding = false;
+		int lastBestIndex = -1;
 
 		while (running.load())
 		{
@@ -964,6 +1010,7 @@ namespace Cheats
 				break;
 
 			SettingsSnapshot settings = SnapshotSettings();
+			const int retargetDelayMs = std::clamp(settings.aimRetargetDelayMs, 0, 1000);
 			if (settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -1066,6 +1113,21 @@ namespace Cheats
 					}
 				}
 
+				if (retargetDelayMs > 0)
+				{
+					if (bestIndex == -1)
+					{
+						if (lastBestIndex != -1)
+							std::this_thread::sleep_for(std::chrono::milliseconds(retargetDelayMs));
+					}
+					else if (lastBestIndex != -1 && bestIndex != lastBestIndex)
+					{
+						std::this_thread::sleep_for(std::chrono::milliseconds(retargetDelayMs));
+					}
+				}
+
+				lastBestIndex = bestIndex;
+
 				if (triggerShouldHold)
 				{
 					if (!triggerHolding)
@@ -1085,6 +1147,8 @@ namespace Cheats
 				mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 				triggerHolding = false;
 			}
+			if (settings.displayToggle)
+				lastBestIndex = -1;
 
 			{
 				std::unique_lock lock(shared.aimMutex);
@@ -1193,6 +1257,7 @@ namespace Cheats
 			case 44: return "HE";
 			case 45: return "Smoke";
 			case 47: return "Decoy";
+			case 46: return "Molotov";
 			default: break;
 			}
 		}
@@ -1203,6 +1268,7 @@ namespace Cheats
 		case 44: return "HE";
 		case 45: return "Smoke";
 		case 47: return "Decoy";
+		case 46: return "Molotov";
 		default: return "Unknown";
 		}
 	}
@@ -1290,7 +1356,8 @@ namespace Cheats
 		ReloadGrenadeMap(mapName, error);
 
 		char statusBuffer[256]{};
-		sprintf_s(statusBuffer, u8"已记录 [%s] %s", grenadeType.c_str(), spot.name.c_str());
+		const std::string grenadeTypeCn = LocalizeGrenadeType(grenadeType);
+		sprintf_s(statusBuffer, u8"已记录 [%s] %s", grenadeTypeCn.c_str(), spot.name.c_str());
 		{
 			std::scoped_lock grenadeLock(grenadeMutex);
 			grenadeStatus = statusBuffer;
@@ -1643,6 +1710,9 @@ namespace Cheats
 		aim.AddMember("spring", Menu::SPRING_CONSTANT, allocator);
 		aim.AddMember("damping", Menu::DAMPING_CONSTANT, allocator);
 		aim.AddMember("gravity", Menu::GRAVITY_CONSTANT, allocator);
+		aim.AddMember("read_sleep_ms", Menu::read线程休眠毫秒, allocator);
+		aim.AddMember("esp_sleep_ms", Menu::esp线程休眠毫秒, allocator);
+		aim.AddMember("retarget_delay_ms", Menu::瞄准切换延时毫秒, allocator);
 		doc.AddMember("aim", aim, allocator);
 
 		rapidjson::Value helper(rapidjson::kObjectType);
@@ -1735,6 +1805,9 @@ namespace Cheats
 			if (aim.HasMember("spring") && aim["spring"].IsNumber()) Menu::SPRING_CONSTANT = static_cast<float>(aim["spring"].GetDouble());
 			if (aim.HasMember("damping") && aim["damping"].IsNumber()) Menu::DAMPING_CONSTANT = static_cast<float>(aim["damping"].GetDouble());
 			if (aim.HasMember("gravity") && aim["gravity"].IsNumber()) Menu::GRAVITY_CONSTANT = static_cast<float>(aim["gravity"].GetDouble());
+			if (aim.HasMember("read_sleep_ms") && aim["read_sleep_ms"].IsInt()) Menu::read线程休眠毫秒 = aim["read_sleep_ms"].GetInt();
+			if (aim.HasMember("esp_sleep_ms") && aim["esp_sleep_ms"].IsInt()) Menu::esp线程休眠毫秒 = aim["esp_sleep_ms"].GetInt();
+			if (aim.HasMember("retarget_delay_ms") && aim["retarget_delay_ms"].IsInt()) Menu::瞄准切换延时毫秒 = aim["retarget_delay_ms"].GetInt();
 		}
 
 		if (doc.HasMember("helper") && doc["helper"].IsObject())
