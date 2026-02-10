@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <array>
 #include <cstdint>
@@ -31,6 +31,9 @@ namespace Cheats
 		int health = 0;
 		float pitch = 0.0f;
 		float yaw = 0.0f;
+		Vector viewOffset{};
+		int activeWeaponDefIndex = 0;
+		int activeWeaponSubclass = 0;
 		float dis2LP = 0.0f;
 		std::array<Vector, kBoneCount> worldBones{};
 	};
@@ -113,6 +116,19 @@ namespace Cheats
 		float spring = 400.0f;
 		float damping = 260.0f;
 		float gravity = 10.0f;
+		bool helperEnabled = false;
+		bool helperFilterByWeapon = true;
+		bool helperDrawStand = true;
+		bool helperDrawAim = true;
+		bool helperManualTypeOverride = false;
+		int helperManualType = 0;
+		int helperThrowType = 0;
+		float helperStandTolerance = 35.0f;
+		float helperFocusRadius = 30.0f;
+		float helperMaxStandDrawDistance = 2000.0f;
+		float helperLooseGuideDistance = 5000.0f;
+		float helperRecordDistance = 10000.0f;
+		bool helperRecordPending = false;
 		ScreenSize screen{};
 	};
 

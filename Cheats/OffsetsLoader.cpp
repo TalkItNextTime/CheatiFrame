@@ -130,7 +130,9 @@ namespace Cheats
 
 		if (!ReadUintField(offsetsRoot, "dwEntityList", out.dwEntityList, error) ||
 			!ReadUintField(offsetsRoot, "dwViewMatrix", out.dwViewMatrix, error) ||
-			!ReadUintField(offsetsRoot, "dwLocalPlayerPawn", out.dwLocalPlayerPawn, error))
+			!ReadUintField(offsetsRoot, "dwLocalPlayerPawn", out.dwLocalPlayerPawn, error) ||
+			!ReadUintField(offsetsRoot, "dwLocalPlayerController", out.dwLocalPlayerController, error) ||
+			!ReadUintField(offsetsRoot, "dwGlobalVars", out.dwGlobalVars, error))
 		{
 			error = "offsets.json read failed: " + error;
 			return false;
@@ -139,6 +141,8 @@ namespace Cheats
 		PrintLoadedOffset("offsets.json", "dwEntityList", out.dwEntityList);
 		PrintLoadedOffset("offsets.json", "dwViewMatrix", out.dwViewMatrix);
 		PrintLoadedOffset("offsets.json", "dwLocalPlayerPawn", out.dwLocalPlayerPawn);
+		PrintLoadedOffset("offsets.json", "dwLocalPlayerController", out.dwLocalPlayerController);
+		PrintLoadedOffset("offsets.json", "dwGlobalVars", out.dwGlobalVars);
 
 		rapidjson::Document buttonsDoc;
 		if (!ParseJsonFile(buttonsPath, buttonsDoc, error))
@@ -195,6 +199,12 @@ namespace Cheats
 			{ "C_CSPlayerPawn", "m_aimPunchAngle", &out.m_aimPunchAngle },
 			{ "C_CSPlayerPawn", "m_iIDEntIndex", &out.m_iIDEntIndex },
 			{ "C_CSPlayerPawn", "m_angEyeAngles", &out.m_angEyeAngles },
+			{ "C_BaseModelEntity", "m_vecViewOffset", &out.m_vecViewOffset },
+			{ "C_CSPlayerPawn", "m_pClippingWeapon", &out.m_pClippingWeapon },
+			{ "C_BaseEntity", "m_nSubclassID", &out.m_nSubclassID },
+			{ "C_EconEntity", "m_AttributeManager", &out.m_AttributeManager },
+			{ "C_AttributeContainer", "m_Item", &out.m_Item },
+			{ "C_EconItemView", "m_iItemDefinitionIndex", &out.m_iItemDefinitionIndex },
 		};
 
 		for (const auto& spec : specs)

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstdint>
 
@@ -9,6 +9,8 @@ namespace Cheats
 		std::uintptr_t dwEntityList{};
 		std::uintptr_t dwViewMatrix{};
 		std::uintptr_t dwLocalPlayerPawn{};
+		std::uintptr_t dwLocalPlayerController{};
+		std::uintptr_t dwGlobalVars{};
 
 		std::uintptr_t attack{};
 		std::uintptr_t attack2{};
@@ -25,5 +27,11 @@ namespace Cheats
 		std::uintptr_t m_aimPunchAngle{};
 		std::uintptr_t m_iIDEntIndex{};
 		std::uintptr_t m_angEyeAngles{};
+		std::uintptr_t m_vecViewOffset{};
+		std::uintptr_t m_pClippingWeapon{};
+		std::uintptr_t m_nSubclassID{};
+		std::uintptr_t m_AttributeManager{};
+		std::uintptr_t m_Item{};
+		std::uintptr_t m_iItemDefinitionIndex{};
 	};
 }

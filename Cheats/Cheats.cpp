@@ -2,8 +2,17 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <cstdio>
+#include <fstream>
 #include <limits>
+#include <algorithm>
+#include <direct.h>
+
+#include <rapidjson/document.h>
+#include <rapidjson/istreamwrapper.h>
+#include <rapidjson/ostreamwrapper.h>
+#include <rapidjson/prettywriter.h>
 
 #include "../Visuals/Menu.h"
 #include "../Visuals/External.h"
@@ -16,7 +25,75 @@ namespace
 {
 	using Cheats::ScreenSize;
 	using Cheats::EspPlayer;
+	using Cheats::GrenadeMapData;
+	using Cheats::GrenadeSpot;
 	using Cheats::kBoneCount;
+
+	constexpr float kGrenadeEyeHeightDefault = 64.0f;
+
+	const char* GrenadeTypeLabelByIndex(const int index)
+	{
+		switch (index)
+		{
+		case 0: return "Smoke";
+		case 1: return "Flash";
+		case 2: return "HE";
+		case 3: return "Decoy";
+		default: return "Unknown";
+		}
+	}
+
+	const char* ThrowTypeLabelByIndex(const int index)
+	{
+		switch (index)
+		{
+		case 0: return "StandThrow";
+		case 1: return "JumpThrow";
+		case 2: return "RunThrow";
+		default: return "StandThrow";
+		}
+	}
+
+	bool ReadVectorField(const rapidjson::Value& obj, const char* key, Vector& out)
+	{
+		if (!obj.HasMember(key) || !obj[key].IsObject())
+			return false;
+
+		const auto& node = obj[key];
+		if (!node.HasMember("x") || !node["x"].IsNumber() ||
+			!node.HasMember("y") || !node["y"].IsNumber() ||
+			!node.HasMember("z") || !node["z"].IsNumber())
+		{
+			return false;
+		}
+
+		out.x = static_cast<float>(node["x"].GetDouble());
+		out.y = static_cast<float>(node["y"].GetDouble());
+		out.z = static_cast<float>(node["z"].GetDouble());
+		return true;
+	}
+
+	void WriteVectorField(rapidjson::Value& parent,
+		const char* key,
+		const Vector& vec,
+		rapidjson::Document::AllocatorType& allocator)
+	{
+		rapidjson::Value node(rapidjson::kObjectType);
+		node.AddMember("x", vec.x, allocator);
+		node.AddMember("y", vec.y, allocator);
+		node.AddMember("z", vec.z, allocator);
+		parent.AddMember(rapidjson::Value(key, allocator), node, allocator);
+	}
+
+	std::string NormalizeMapName(std::string value)
+	{
+		if (value.rfind("maps/", 0) == 0)
+			value = value.substr(5);
+		const std::string bsp = ".bsp";
+		if (value.size() > bsp.size() && value.substr(value.size() - bsp.size()) == bsp)
+			value = value.substr(0, value.size() - bsp.size());
+		return value;
+	}
 
 	// 判断指定屏幕坐标是否位于窗口范围内。
 	bool InScreen(const ScreenSize& screen, float x, float y)
@@ -314,8 +391,21 @@ namespace Cheats
 			aim = shared.aim;
 		}
 
+		if (settings.helperRecordPending)
+			TryRecordGrenadeSpot(raw, settings);
+
+		if (settings.helperEnabled)
+		{
+			std::string currentMap = ReadCurrentMapName();
+			if (currentMap.empty())
+				currentMap = NormalizeMapName(Menu::helper地图名);
+			EnsureGrenadeMapLoaded(currentMap);
+		}
+
 		RenderEsp(esp, settings);
 		RenderAim(aim);
+		if (settings.helperEnabled)
+			RenderGrenadeHelper(raw, settings);
 		RenderCrosshairInfo(raw, settings);
 	}
 
@@ -397,7 +487,42 @@ namespace Cheats
 		snapshot.spring = Menu::SPRING_CONSTANT;
 		snapshot.damping = Menu::DAMPING_CONSTANT;
 		snapshot.gravity = Menu::GRAVITY_CONSTANT;
+		snapshot.helperEnabled = Menu::helper启用;
+		snapshot.helperFilterByWeapon = Menu::helper按武器筛选;
+		snapshot.helperDrawStand = Menu::helper绘制站位;
+		snapshot.helperDrawAim = Menu::helper绘制瞄点;
+		snapshot.helperManualTypeOverride = Menu::helper手动类型覆盖;
+		snapshot.helperManualType = Menu::helper手动类型;
+		snapshot.helperThrowType = Menu::helper投掷方式;
+		snapshot.helperStandTolerance = Menu::helper站位容差;
+		snapshot.helperFocusRadius = Menu::helper聚焦半径;
+		snapshot.helperMaxStandDrawDistance = Menu::helper站位最远绘制;
+		snapshot.helperLooseGuideDistance = Menu::helper非聚焦引导线距离;
+		snapshot.helperRecordDistance = Menu::helper记录瞄点距离;
+		snapshot.helperRecordPending = Menu::helper请求记录;
+		Menu::helper请求记录 = false;
 		snapshot.screen = { Visual::external.gamewindow.size.x, Visual::external.gamewindow.size.y };
+
+		if (Menu::helper请求刷新)
+		{
+			std::string error;
+			std::string mapName = NormalizeMapName(Menu::helper地图名);
+			if (mapName.empty())
+				mapName = ReadCurrentMapName();
+			if (mapName.empty())
+				mapName = "de_dust2";
+			if (ReloadGrenadeMap(mapName, error))
+				Menu::helper状态 = u8"已重载地图点位: " + mapName;
+			else
+				Menu::helper状态 = u8"重载失败: " + error;
+			Menu::helper请求刷新 = false;
+		}
+
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			if (!grenadeStatus.empty())
+				Menu::helper状态 = grenadeStatus;
+		}
 
 		std::unique_lock lock(shared.settingsMutex);
 		shared.settings = snapshot;
@@ -418,9 +543,9 @@ namespace Cheats
 		const bool anyEspDraw = settings.utilDraw &&
 			(settings.visBox2D || settings.visBox3D || settings.visBones || settings.visHealth || settings.visDistance);
 		const bool anyEspAux = settings.visCross || (settings.utilDraw && settings.aimDrawFov);
-		const bool espNeeded = anyEspDraw || anyEspAux || settings.aimEnabled;
+		const bool espNeeded = anyEspDraw || anyEspAux || settings.aimEnabled || settings.helperEnabled;
 		const bool aimNeeded = settings.aimEnabled || settings.aimTrigger || settings.aimRecoil;
-		const bool readNeeded = anyEspDraw || aimNeeded;
+		const bool readNeeded = anyEspDraw || aimNeeded || settings.helperEnabled;
 
 		if (readEnabled.exchange(readNeeded) != readNeeded)
 			readCv.notify_all();
@@ -456,6 +581,8 @@ namespace Cheats
 	void Game::ReadWorker()
 	{
 		const int* boneIds = reinterpret_cast<const int*>(&boneindex);
+		int readTick = 0;
+		constexpr int kHeavyReadInterval = 10;
 
 		while (running.load())
 		{
@@ -487,7 +614,22 @@ namespace Cheats
 			newRaw.local.valid = true;
 			newRaw.local.pAddr = localAddr;
 			newRaw.local.origin = Read<Vector>(localAddr + offsets.m_vOldOrigin);
+			newRaw.local.viewOffset = Read<Vector>(localAddr + offsets.m_vecViewOffset);
+			{
+				Vector localEyeAngles = Read<Vector>(localAddr + offsets.m_angEyeAngles);
+				newRaw.local.pitch = localEyeAngles.x;
+				newRaw.local.yaw = localEyeAngles.y;
+			}
 			newRaw.local.team = Read<int>(localAddr + offsets.m_iTeamNum);
+
+			const std::uintptr_t clippingWeapon = Read<std::uintptr_t>(localAddr + offsets.m_pClippingWeapon);
+			if (clippingWeapon)
+			{
+				newRaw.local.activeWeaponSubclass = Read<int>(clippingWeapon + offsets.m_nSubclassID);
+				const std::uintptr_t attributeManager = clippingWeapon + offsets.m_AttributeManager;
+				const std::uintptr_t itemView = attributeManager + offsets.m_Item;
+				newRaw.local.activeWeaponDefIndex = Read<std::uint16_t>(itemView + offsets.m_iItemDefinitionIndex);
+			}
 
 			newRaw.crosshairEnt = Read<int>(localAddr + offsets.m_iIDEntIndex);
 			newRaw.shotsFired = Read<int>(localAddr + offsets.m_iShotsFired);
@@ -495,6 +637,7 @@ namespace Cheats
 
 			const bool needBones = settings.aimEnabled || (settings.utilDraw && settings.visBones);
 			const bool needYaw = settings.utilDraw && settings.visBox3D;
+			const bool shouldReadHeavy = ((++readTick) % kHeavyReadInterval) == 0;
 
 			for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
 			{
@@ -504,7 +647,7 @@ namespace Cheats
 				if (!listEntry1)
 					continue;
 
-				std::uintptr_t playerController = Read<uintptr_t>(listEntry1 + 120ull * (index & 0x1FF));
+				std::uintptr_t playerController = Read<uintptr_t>(listEntry1 + 112ull * (index & 0x1FF));
 				if (!playerController)
 					continue;
 
@@ -516,7 +659,7 @@ namespace Cheats
 				if (!listEntry2)
 					continue;
 
-				std::uintptr_t pawnPtr = Read<uintptr_t>(listEntry2 + 120ull * (playerPawn & 0x1FF));
+				std::uintptr_t pawnPtr = Read<uintptr_t>(listEntry2 + 112ull * (playerPawn & 0x1FF));
 				if (!pawnPtr)
 					continue;
 
@@ -539,7 +682,7 @@ namespace Cheats
 				player.health = Read<int>(player.pAddr + offsets.m_iHealth);
 				player.origin = Read<Vector>(player.pAddr + offsets.m_vOldOrigin);
 
-				if (needYaw)
+				if (needYaw && shouldReadHeavy)
 				{
 					Vector ang = Read<Vector>(player.pAddr + offsets.m_angEyeAngles);
 					player.pitch = ang.x;
@@ -548,7 +691,7 @@ namespace Cheats
 
 				player.dis2LP = newRaw.local.origin.CalcDis2Point3D(player.origin);
 
-				if (needBones)
+				if (needBones && shouldReadHeavy)
 				{
 					player.sceneNode = Read<uintptr_t>(player.pAddr + offsets.m_pGameSceneNode);
 					if (player.sceneNode)
@@ -712,6 +855,8 @@ namespace Cheats
 	// 自瞄线程：执行目标筛选、平滑移动与扳机逻辑。
 	void Game::AimWorker()
 	{
+		bool triggerHolding = false;
+
 		while (running.load())
 		{
 			WaitForEnable(aimEnabled, aimCv, aimMutex, running);
@@ -751,6 +896,8 @@ namespace Cheats
 
 			if (!settings.displayToggle)
 			{
+				bool triggerShouldHold = false;
+
 				int bestIndex = -1;
 				float bestDist = std::numeric_limits<float>::max();
 
@@ -814,19 +961,28 @@ namespace Cheats
 					{
 						const RawPlayer& target = raw.players[raw.crosshairEnt];
 						if (target.valid && (!settings.utilTeamCheck || target.team != raw.local.team))
-							mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-						else
-							mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-					}
-					else
-					{
-						mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+							triggerShouldHold = true;
 					}
 				}
-				else
+
+				if (triggerShouldHold)
+				{
+					if (!triggerHolding)
+					{
+						mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+						triggerHolding = true;
+					}
+				}
+				else if (triggerHolding)
 				{
 					mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+					triggerHolding = false;
 				}
+			}
+			else if (triggerHolding)
+			{
+				mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+				triggerHolding = false;
 			}
 
 			{
@@ -836,6 +992,9 @@ namespace Cheats
 
 			std::this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
+
+		if (triggerHolding)
+			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 	}
 
 	// 渲染所有ESP可视化元素。
@@ -900,5 +1059,593 @@ namespace Cheats
 				ImColor(255, 0, 0));
 		}
 	}
-}
 
+	std::string Game::ReadCurrentMapName() const
+	{
+		if (!gamehandle || !client || !offsets.dwGlobalVars)
+			return {};
+
+		const std::uintptr_t globalVars = Read<std::uintptr_t>(client + offsets.dwGlobalVars);
+		if (!globalVars)
+			return {};
+
+		const std::uintptr_t mapNamePtr = Read<std::uintptr_t>(globalVars + 0x188);
+		if (!mapNamePtr)
+			return {};
+
+		char mapBuffer[128]{};
+		if (!ReadProcessMemory(gamehandle, reinterpret_cast<void*>(mapNamePtr), mapBuffer, sizeof(mapBuffer) - 1, nullptr))
+			return {};
+
+		mapBuffer[sizeof(mapBuffer) - 1] = '\0';
+		return NormalizeMapName(std::string(mapBuffer));
+	}
+
+	std::string Game::ReadCurrentGrenadeType(const RawState& raw) const
+	{
+		if (raw.local.activeWeaponSubclass)
+		{
+			switch (raw.local.activeWeaponSubclass)
+			{
+			case 43: return "Flash";
+			case 44: return "HE";
+			case 45: return "Smoke";
+			case 47: return "Decoy";
+			default: break;
+			}
+		}
+
+		switch (raw.local.activeWeaponDefIndex)
+		{
+		case 43: return "Flash";
+		case 44: return "HE";
+		case 45: return "Smoke";
+		case 47: return "Decoy";
+		default: return "Unknown";
+		}
+	}
+
+	Vector Game::ComputeFarAimPoint(const Vector& eyePos, float pitchDeg, float yawDeg, float distance) const
+	{
+		const float pitch = pitchDeg * (kPi / 180.0f);
+		const float yaw = yawDeg * (kPi / 180.0f);
+
+		Vector forward{};
+		forward.x = std::cos(pitch) * std::cos(yaw);
+		forward.y = std::cos(pitch) * std::sin(yaw);
+		forward.z = -std::sin(pitch);
+
+		return {
+			eyePos.x + forward.x * distance,
+			eyePos.y + forward.y * distance,
+			eyePos.z + forward.z * distance,
+		};
+	}
+
+	void Game::TryRecordGrenadeSpot(const RawState& raw, const SettingsSnapshot& settings)
+	{
+		if (!raw.hasLocal)
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			grenadeStatus = u8"记录失败：未获取本地玩家";
+			return;
+		}
+
+		std::string mapName = NormalizeMapName(ReadCurrentMapName());
+		if (mapName.empty())
+			mapName = NormalizeMapName(Menu::helper地图名);
+		if (mapName.empty())
+			mapName = "de_dust2";
+
+		std::string grenadeType;
+		if (settings.helperManualTypeOverride)
+			grenadeType = GrenadeTypeLabelByIndex(settings.helperManualType);
+		else
+			grenadeType = ReadCurrentGrenadeType(raw);
+
+		if (grenadeType == "Unknown")
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			grenadeStatus = u8"记录失败：当前不是可识别投掷物";
+			return;
+		}
+
+		const Vector standPos = raw.local.origin;
+		Vector eyePos = raw.local.origin;
+		if (!raw.local.viewOffset.IsZero())
+			eyePos = raw.local.origin + raw.local.viewOffset;
+		else
+			eyePos.z += kGrenadeEyeHeightDefault;
+
+		const Vector aimPos = ComputeFarAimPoint(eyePos, raw.local.pitch, raw.local.yaw, settings.helperRecordDistance);
+
+		GrenadeSpot spot{};
+		spot.type = grenadeType;
+		spot.name = Menu::helper备注;
+		if (spot.name.empty())
+			spot.name = "Unnamed";
+		spot.throwType = ThrowTypeLabelByIndex(settings.helperThrowType);
+		spot.standPos = standPos;
+		spot.aimPos = aimPos;
+
+		_mkdir("GrenadeData");
+		const std::string filePath = std::string("GrenadeData\\") + mapName + ".json";
+
+		std::string error;
+		if (!AppendGrenadeSpotToJson(filePath, mapName, spot, error))
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			grenadeStatus = u8"记录失败：" + error;
+			return;
+		}
+
+		ReloadGrenadeMap(mapName, error);
+
+		char statusBuffer[256]{};
+		sprintf_s(statusBuffer, "已记录 [%s] %s", grenadeType.c_str(), spot.name.c_str());
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			grenadeStatus = statusBuffer;
+		}
+	}
+
+	bool Game::LoadGrenadeJsonFile(const std::string& filePath, GrenadeMapData& out, std::string& error) const
+	{
+		std::ifstream stream(filePath);
+		if (!stream.is_open())
+		{
+			error = "无法打开文件: " + filePath;
+			return false;
+		}
+
+		rapidjson::IStreamWrapper wrapper(stream);
+		rapidjson::Document doc;
+		doc.ParseStream(wrapper);
+		if (doc.HasParseError() || !doc.IsObject())
+		{
+			error = "JSON 解析失败";
+			return false;
+		}
+
+		if (!doc.HasMember("map_name") || !doc["map_name"].IsString())
+		{
+			error = "缺少 map_name";
+			return false;
+		}
+
+		if (!doc.HasMember("grenades") || !doc["grenades"].IsArray())
+		{
+			error = "缺少 grenades 数组";
+			return false;
+		}
+
+		out.mapName = NormalizeMapName(doc["map_name"].GetString());
+		out.spots.clear();
+		const auto& list = doc["grenades"];
+		out.spots.reserve(list.Size());
+
+		for (rapidjson::SizeType i = 0; i < list.Size(); ++i)
+		{
+			const auto& item = list[i];
+			if (!item.IsObject())
+				continue;
+
+			GrenadeSpot spot{};
+			if (item.HasMember("id") && item["id"].IsInt())
+				spot.id = item["id"].GetInt();
+			if (item.HasMember("type") && item["type"].IsString())
+				spot.type = item["type"].GetString();
+			if (item.HasMember("name") && item["name"].IsString())
+				spot.name = item["name"].GetString();
+			if (item.HasMember("throw_type") && item["throw_type"].IsString())
+				spot.throwType = item["throw_type"].GetString();
+
+			Vector stand{};
+			Vector aim{};
+			if (!ReadVectorField(item, "position", stand) || !ReadVectorField(item, "aim_target", aim))
+				continue;
+
+			spot.standPos = stand;
+			spot.aimPos = aim;
+			if (spot.name.empty())
+				spot.name = "Unnamed";
+			if (spot.type.empty())
+				spot.type = "Unknown";
+			out.spots.push_back(std::move(spot));
+		}
+
+		return true;
+	}
+
+	bool Game::AppendGrenadeSpotToJson(const std::string& filePath,
+		const std::string& mapName,
+		const GrenadeSpot& spot,
+		std::string& error) const
+	{
+		rapidjson::Document doc;
+		doc.SetObject();
+		auto& allocator = doc.GetAllocator();
+
+		if (std::ifstream test(filePath); test.good())
+		{
+			std::ifstream in(filePath);
+			if (!in.is_open())
+			{
+				error = "打开已有文件失败";
+				return false;
+			}
+			rapidjson::IStreamWrapper inWrapper(in);
+			doc.ParseStream(inWrapper);
+			if (doc.HasParseError() || !doc.IsObject())
+			{
+				error = "已有文件不是有效JSON";
+				return false;
+			}
+		}
+
+		if (!doc.HasMember("map_name") || !doc["map_name"].IsString())
+			doc.AddMember("map_name", rapidjson::Value(mapName.c_str(), allocator), allocator);
+
+		if (!doc.HasMember("grenades") || !doc["grenades"].IsArray())
+			doc.AddMember("grenades", rapidjson::Value(rapidjson::kArrayType), allocator);
+
+		auto& grenades = doc["grenades"];
+		int nextId = 1;
+		for (auto& it : grenades.GetArray())
+		{
+			if (it.IsObject() && it.HasMember("id") && it["id"].IsInt())
+				nextId = std::max(nextId, it["id"].GetInt() + 1);
+		}
+
+		rapidjson::Value node(rapidjson::kObjectType);
+		node.AddMember("id", nextId, allocator);
+		node.AddMember("type", rapidjson::Value(spot.type.c_str(), allocator), allocator);
+		node.AddMember("name", rapidjson::Value(spot.name.c_str(), allocator), allocator);
+		WriteVectorField(node, "position", spot.standPos, allocator);
+		WriteVectorField(node, "aim_target", spot.aimPos, allocator);
+		node.AddMember("throw_type", rapidjson::Value(spot.throwType.c_str(), allocator), allocator);
+		grenades.PushBack(node, allocator);
+
+		std::ofstream out(filePath, std::ios::trunc);
+		if (!out.is_open())
+		{
+			error = "写入文件失败";
+			return false;
+		}
+
+		rapidjson::OStreamWrapper outWrapper(out);
+		rapidjson::PrettyWriter<rapidjson::OStreamWrapper> writer(outWrapper);
+		writer.SetIndent(' ', 2);
+		doc.Accept(writer);
+		return true;
+	}
+
+	bool Game::ReloadGrenadeMap(const std::string& mapName, std::string& error)
+	{
+		GrenadeMapData loaded{};
+		const std::string filePath = std::string("GrenadeData\\") + NormalizeMapName(mapName) + ".json";
+		const bool hasFile = std::ifstream(filePath).good();
+
+		if (!hasFile)
+		{
+			loaded.mapName = NormalizeMapName(mapName);
+			loaded.spots.clear();
+			loaded.revision = ++grenadeRevision;
+			{
+				std::scoped_lock grenadeLock(grenadeMutex);
+				grenadeData = loaded;
+				loadedGrenadeMap = loaded.mapName;
+				grenadeStatus = u8"未找到点位文件，已创建空缓存: " + loaded.mapName;
+			}
+			error.clear();
+			return true;
+		}
+
+		if (!LoadGrenadeJsonFile(filePath, loaded, error))
+			return false;
+
+		loaded.revision = ++grenadeRevision;
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			grenadeData = loaded;
+			loadedGrenadeMap = loaded.mapName;
+			char buff[128]{};
+			sprintf_s(buff, "已加载 %zu 个点位 (%s)", loaded.spots.size(), loaded.mapName.c_str());
+			grenadeStatus = buff;
+		}
+		return true;
+	}
+
+	void Game::EnsureGrenadeMapLoaded(const std::string& mapName)
+	{
+		const std::string normalized = NormalizeMapName(mapName);
+		if (normalized.empty())
+			return;
+
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			if (loadedGrenadeMap == normalized)
+				return;
+		}
+
+		std::string error;
+		if (!ReloadGrenadeMap(normalized, error))
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			grenadeStatus = u8"加载点位失败: " + error;
+		}
+	}
+
+	void Game::RenderGrenadeHelper(const RawState& raw, const SettingsSnapshot& settings) const
+	{
+		if (!raw.hasLocal || !raw.hasMatrix || settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
+			return;
+
+		GrenadeMapData data{};
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			data = grenadeData;
+		}
+
+		if (data.spots.empty())
+			return;
+
+		const std::string currentWeapon = settings.helperManualTypeOverride
+			? GrenadeTypeLabelByIndex(settings.helperManualType)
+			: ReadCurrentGrenadeType(raw);
+		if (settings.helperFilterByWeapon && currentWeapon == "Unknown")
+			return;
+
+		struct StandDrawItem
+		{
+			const GrenadeSpot* spot = nullptr;
+			Vector standScreen{};
+		};
+
+		struct AimDrawItem
+		{
+			const GrenadeSpot* spot = nullptr;
+			Vector aimScreen{};
+			float distToCross = std::numeric_limits<float>::max();
+			float distToMouse = std::numeric_limits<float>::max();
+		};
+
+		std::vector<StandDrawItem> standItems{};
+		std::vector<AimDrawItem> aimItems{};
+		standItems.reserve(data.spots.size());
+		aimItems.reserve(data.spots.size());
+
+		const Vector localPos = raw.local.origin;
+		const Vector cross = GetCross(settings.screen);
+		const ImVec2 mouse = ImGui::GetIO().MousePos;
+		const Vector mousePos{ mouse.x, mouse.y, 0.0f };
+		constexpr float kAimCircleRadius = 10.0f;
+		constexpr float kAimHoverRadius = 16.0f;
+		constexpr float kStandClusterRadius = 26.0f;
+
+		const GrenadeSpot* closest = nullptr;
+		float minCrossDist = std::numeric_limits<float>::max();
+
+		for (const auto& spot : data.spots)
+		{
+			if (settings.helperFilterByWeapon && spot.type != currentWeapon)
+				continue;
+
+			const float standDist = localPos.CalcDis2Point3D(spot.standPos);
+			if (standDist > settings.helperMaxStandDrawDistance)
+				continue;
+
+			if (settings.helperDrawStand)
+			{
+				Vector standScreen{};
+				if (WorldToScreen(spot.standPos, raw.matrix, settings.screen, standScreen) &&
+					InScreen(settings.screen, standScreen.x, standScreen.y))
+				{
+					standItems.push_back({ &spot, standScreen });
+				}
+			}
+
+			if (!settings.helperDrawAim)
+				continue;
+
+			if (standDist > settings.helperStandTolerance)
+				continue;
+
+			Vector aimScreen{};
+			if (!WorldToScreen(spot.aimPos, raw.matrix, settings.screen, aimScreen))
+				continue;
+			if (!InScreen(settings.screen, aimScreen.x, aimScreen.y))
+				continue;
+
+			const float distToCross = aimScreen.CalculateDistanceToPoint2D(cross);
+			const float distToMouse = aimScreen.CalculateDistanceToPoint2D(mousePos);
+			aimItems.push_back({ &spot, aimScreen, distToCross, distToMouse });
+
+			if (distToCross < minCrossDist)
+			{
+				minCrossDist = distToCross;
+				closest = &spot;
+			}
+		}
+
+		if (standItems.empty() && aimItems.empty())
+			return;
+
+		const bool focusingByCrosshair = minCrossDist <= settings.helperFocusRadius;
+
+		const GrenadeSpot* hoveredSpot = nullptr;
+		float minMouseDist = std::numeric_limits<float>::max();
+		for (const auto& item : aimItems)
+		{
+			if (item.distToMouse <= kAimHoverRadius && item.distToMouse < minMouseDist)
+			{
+				minMouseDist = item.distToMouse;
+				hoveredSpot = item.spot;
+			}
+		}
+
+		const bool focusingByMouse = (hoveredSpot != nullptr);
+		const bool isolateMode = focusingByMouse;
+		const GrenadeSpot* selectedSpot = focusingByMouse ? hoveredSpot : closest;
+
+		auto* draw = ImGui::GetBackgroundDrawList();
+
+		if (settings.helperDrawStand && !standItems.empty())
+		{
+			struct StandCluster
+			{
+				Vector center{};
+				std::vector<const StandDrawItem*> items{};
+			};
+
+			std::vector<const StandDrawItem*> standRefs{};
+			standRefs.reserve(standItems.size());
+			for (const auto& item : standItems)
+			{
+				if (isolateMode && item.spot != selectedSpot)
+					continue;
+				standRefs.push_back(&item);
+			}
+
+			std::vector<StandCluster> clusters{};
+			clusters.reserve(standRefs.size());
+
+			for (const StandDrawItem* item : standRefs)
+			{
+				bool merged = false;
+				for (auto& cluster : clusters)
+				{
+					if (item->standScreen.CalculateDistanceToPoint2D(cluster.center) > kStandClusterRadius)
+						continue;
+
+					cluster.items.push_back(item);
+					const float count = static_cast<float>(cluster.items.size());
+					cluster.center.x = (cluster.center.x * (count - 1.0f) + item->standScreen.x) / count;
+					cluster.center.y = (cluster.center.y * (count - 1.0f) + item->standScreen.y) / count;
+					merged = true;
+					break;
+				}
+
+				if (!merged)
+				{
+					StandCluster cluster{};
+					cluster.center = item->standScreen;
+					cluster.items.push_back(item);
+					clusters.push_back(std::move(cluster));
+				}
+			}
+
+			for (const auto& cluster : clusters)
+			{
+				draw->AddCircleFilled({ cluster.center.x, cluster.center.y }, 4.0f, ImColor(255, 255, 0));
+
+				if (cluster.items.empty())
+					continue;
+
+				if (cluster.items.size() == 1)
+				{
+					const GrenadeSpot* spot = cluster.items.front()->spot;
+					std::string label = spot->name;
+					if (!spot->throwType.empty())
+						label += " [" + spot->throwType + "]";
+					draw->AddText({ cluster.center.x + 6.0f, cluster.center.y + 8.0f }, ImColor(255, 255, 255), label.c_str());
+					continue;
+				}
+
+				std::vector<std::string> rows{};
+				rows.reserve(cluster.items.size());
+				for (const StandDrawItem* rowItem : cluster.items)
+				{
+					std::string row = rowItem->spot->name;
+					if (!rowItem->spot->throwType.empty())
+						row += " [" + rowItem->spot->throwType + "]";
+					rows.push_back(std::move(row));
+				}
+
+				std::sort(rows.begin(), rows.end());
+				rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+
+				float maxWidth = 0.0f;
+				for (const auto& row : rows)
+				{
+					const ImVec2 size = ImGui::CalcTextSize(row.c_str());
+					maxWidth = std::max(maxWidth, size.x);
+				}
+
+				const float lineHeight = ImGui::GetTextLineHeight();
+				const float padding = 6.0f;
+				const float boxWidth = maxWidth + padding * 2.0f;
+				const float boxHeight = static_cast<float>(rows.size()) * lineHeight + padding * 2.0f;
+				const ImVec2 boxPos{ cluster.center.x + 12.0f, cluster.center.y + 10.0f };
+
+				draw->AddRectFilled(boxPos, { boxPos.x + boxWidth, boxPos.y + boxHeight }, ImColor(12, 12, 12, 200), 4.0f);
+				draw->AddRect(boxPos, { boxPos.x + boxWidth, boxPos.y + boxHeight }, ImColor(255, 215, 0, 200), 4.0f);
+
+				for (size_t i = 0; i < rows.size(); ++i)
+				{
+					draw->AddText(
+						{ boxPos.x + padding, boxPos.y + padding + static_cast<float>(i) * lineHeight },
+						ImColor(255, 255, 255),
+						rows[i].c_str());
+				}
+			}
+		}
+
+		for (const auto& item : aimItems)
+		{
+			if (focusingByMouse && item.spot != hoveredSpot)
+				continue;
+			if (!focusingByMouse && focusingByCrosshair && item.spot != closest)
+				continue;
+
+			const bool isTarget = (item.spot == selectedSpot);
+			const ImColor pointColor = isTarget ? ImColor(255, 80, 80) : ImColor(0, 255, 0);
+			draw->AddCircle(
+				{ item.aimScreen.x, item.aimScreen.y },
+				kAimCircleRadius,
+				pointColor,
+				0,
+				2.0f);
+
+			if (focusingByMouse || focusingByCrosshair)
+			{
+				draw->AddLine(
+					{ cross.x, cross.y },
+					{ item.aimScreen.x, item.aimScreen.y },
+					ImColor(255, 60, 60),
+					2.0f);
+			}
+			else if (item.distToCross <= settings.helperLooseGuideDistance && isTarget)
+			{
+				draw->AddLine(
+					{ cross.x, cross.y },
+					{ item.aimScreen.x, item.aimScreen.y },
+					ImColor(255, 255, 255, 120),
+					1.0f);
+			}
+
+			std::string aimLabel = item.spot->name;
+			if (!item.spot->throwType.empty())
+				aimLabel += " [" + item.spot->throwType + "]";
+			draw->AddText(
+				{ item.aimScreen.x + 12.0f, item.aimScreen.y - 16.0f },
+				isTarget ? ImColor(255, 245, 190) : ImColor(215, 215, 215),
+				aimLabel.c_str());
+		}
+
+		if (selectedSpot)
+		{
+			std::string throwType = selectedSpot->throwType.empty() ? "StandThrow" : selectedSpot->throwType;
+			std::string topText = std::string(u8"投掷方式: ") + throwType;
+			if (!selectedSpot->name.empty())
+				topText += "  |  " + selectedSpot->name;
+
+			const float fontSize = 30.0f;
+			const ImVec2 textSize = ImGui::GetFont()->CalcTextSizeA(fontSize, 2000.0f, 0.0f, topText.c_str());
+			const ImVec2 textPos{ (settings.screen.x - textSize.x) * 0.5f, 28.0f };
+
+			draw->AddText(ImGui::GetFont(), fontSize, { textPos.x + 1.0f, textPos.y + 1.0f }, ImColor(0, 0, 0, 220), topText.c_str());
+			draw->AddText(ImGui::GetFont(), fontSize, textPos, ImColor(255, 220, 120), topText.c_str());
+		}
+	}
+}

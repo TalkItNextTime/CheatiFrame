@@ -1,5 +1,6 @@
-#pragma once
+ï»¿#pragma once
 
+#include <string>
 
 namespace Menu
 {
@@ -11,43 +12,63 @@ namespace Menu
 
 
 
-	inline bool DisplayToggle = true; //²Ëµ¥ÏÔÊ¾¿ª¹Ø
-	void ShowMenu();//ÏÔÊ¾²Ëµ¥µÄº¯Êı
+	inline bool DisplayToggle = true; //èœå•æ˜¾ç¤ºå¼€å…³
+	void ShowMenu();//æ˜¾ç¤ºèœå•çš„å‡½æ•°
 
-	inline bool utilÅĞ¶ÏÕóÓª = true;
-	inline bool util¿ÉÊÓ¼ì²é = true;
-	inline bool util»æÖÆ×Ü¿ª¹Ø = true;
-	inline bool vis·½¿òÍ¸ÊÓ = false;
-	inline bool vis3DBoxÍ¸ÊÓ = true;
-	inline bool vis»æÖÆ¹Ç÷À = false;
-	inline bool vis»æÖÆÑªÌõ = true;
-	inline bool vis»æÖÆ¾àÀë = false;
-	inline bool vis»æÖÆ×¼ĞÄ = true;
-	inline bool aim»æÖÆFOV = true;
-	inline bool aim×ÔÃé = true;
-	//inline bool aim¿ÉÊÓÅĞ¶Ï = true;
-	inline bool aimºó×ù²¹³¥ = false;
-	inline bool aim°â»ú = true;
+	inline bool utilåˆ¤æ–­é˜µè¥ = true;
+	inline bool utilå¯è§†æ£€æŸ¥ = true;
+	inline bool utilç»˜åˆ¶æ€»å¼€å…³ = true;
+	inline bool visæ–¹æ¡†é€è§† = false;
+	inline bool vis3DBoxé€è§† = true;
+	inline bool visç»˜åˆ¶éª¨éª¼ = false;
+	inline bool visç»˜åˆ¶è¡€æ¡ = true;
+	inline bool visç»˜åˆ¶è·ç¦» = false;
+	inline bool visç»˜åˆ¶å‡†å¿ƒ = true;
+	inline bool aimç»˜åˆ¶FOV = true;
+	inline bool aimè‡ªç„ = true;
+	//inline bool aimå¯è§†åˆ¤æ–­ = true;
+	inline bool aimååº§è¡¥å¿ = false;
+	inline bool aimæ‰³æœº = true;
 	inline float aimbotFOV = 130.f;
 	inline int aimbotDis = 250;
-	inline int AimLocation = AimLoc::Head;//×ÔÃéÎ»ÖÃ
+	inline int AimLocation = AimLoc::Head;//è‡ªç„ä½ç½®
 
-	//ºó×ù²¹³¥
+	//ååº§è¡¥å¿
 	inline int recoil_X = 4;
 	inline int recoil_Y = 20;
 
-	//ÈÈ¼ü
-	inline int aimKey = 16;		//Ä¬ÈÏ×óShift
-	inline int triggerKey = 6;	//Ä¬ÈÏÉÏ²à¼ü
-	//inline char* aimHotKey[] = { u8"ÉÏ²à¼ü", u8"ÏÂ²à¼ü", u8"×óShift", u8"´óĞ¡Ğ´Ëø"};
+	//çƒ­é”®
+	inline int aimKey = 16;		//é»˜è®¤å·¦Shift
+	inline int triggerKey = 6;	//é»˜è®¤ä¸Šä¾§é”®
+	//inline char* aimHotKey[] = { u8"ä¸Šä¾§é”®", u8"ä¸‹ä¾§é”®", u8"å·¦Shift", u8"å¤§å°å†™é”"};
 	//inline int DefaultAimHotKey = 0;
-	//inline char* TriggleHotKey[] = { u8"ÉÏ²à¼ü", u8"ÏÂ²à¼ü", u8"×óShift", u8"´óĞ¡Ğ´Ëø" };
+	//inline char* TriggleHotKey[] = { u8"ä¸Šä¾§é”®", u8"ä¸‹ä¾§é”®", u8"å·¦Shift", u8"å¤§å°å†™é”" };
 	//inline int DefaultTriggleHotKey = 3;
 
-	//Ëã·¨
+	//ç®—æ³•
 	inline float MASS = 18.f;
 	inline float SPRING_CONSTANT = 400.0f;
 	inline float DAMPING_CONSTANT = 260.0f;
 	inline float GRAVITY_CONSTANT = 10.f;
+
+	inline bool helperå¯ç”¨ = false;
+	inline bool helperæŒ‰æ­¦å™¨ç­›é€‰ = true;
+	inline bool helperç»˜åˆ¶ç«™ä½ = true;
+	inline bool helperç»˜åˆ¶ç„ç‚¹ = true;
+	inline bool helperæ‰‹åŠ¨ç±»å‹è¦†ç›– = false;
+	inline int helperæ‰‹åŠ¨ç±»å‹ = 0;
+	inline int helperæŠ•æ·æ–¹å¼ = 0;
+	inline float helperç«™ä½å®¹å·® = 35.0f;
+	inline float helperèšç„¦åŠå¾„ = 80.0f;
+	inline float helperç«™ä½æœ€è¿œç»˜åˆ¶ = 2000.0f;
+	inline float helperéèšç„¦å¼•å¯¼çº¿è·ç¦» = 200.0f;
+	inline float helperè®°å½•ç„ç‚¹è·ç¦» = 10000.0f;
+
+	inline char helperåœ°å›¾å[64] = "de_dust2";
+	inline char helperå¤‡æ³¨[128] = "";
+
+	inline bool helperè¯·æ±‚è®°å½• = false;
+	inline bool helperè¯·æ±‚åˆ·æ–° = false;
+	inline std::string helperçŠ¶æ€ = u8"æœªåŠ è½½ç‚¹ä½";
 
 }

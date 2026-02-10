@@ -1,4 +1,4 @@
-#include "Menu.h"
+ï»¿#include "Menu.h"
 #include "../Visuals/External.h"
 
 bool isListeningForAimKey = false;
@@ -17,65 +17,65 @@ void Menu::ShowMenu()
 
 
 	static float temp5 = 50.f;
-	//×Ô¶¨Òå²Ëµ¥Çø
+	//è‡ªå®šä¹‰èœå•åŒº
 	ImGuiIO& io = ImGui::GetIO();
 	ImGui::Begin("Cosmic");
-	ImGui::Text(u8"Ê¹ÓÃInsert¼ü¿ØÖÆ²Ëµ¥ÏÔÒş");
-	ImGui::Text(u8"Ö¡Êı:%.2f     ", io.Framerate);
+	ImGui::Text(u8"ä½¿ç”¨Inserté”®æ§åˆ¶èœå•æ˜¾éš");
+	ImGui::Text(u8"å¸§æ•°:%.2f     ", io.Framerate);
 	ImGui::SameLine();
 	//ImGui::GetFrameCount();
-	//°´Å¥
-	if (ImGui::Button(u8"ÍË³ö"))
+	//æŒ‰é’®
+	if (ImGui::Button(u8"é€€å‡º"))
 	{
 		exit(0);
 	}
-	ImGui::Checkbox(u8"ÅĞ¶ÏÕóÓª", &Menu::utilÅĞ¶ÏÕóÓª);
-	ImGui::Checkbox(u8"¿ÉÊÓ¼ì²é", &Menu::util¿ÉÊÓ¼ì²é);
+	ImGui::Checkbox(u8"åˆ¤æ–­é˜µè¥", &Menu::utilåˆ¤æ–­é˜µè¥);
+	ImGui::Checkbox(u8"å¯è§†æ£€æŸ¥", &Menu::utilå¯è§†æ£€æŸ¥);
 
-	//ĞÂ½¨Ñ¡Ïî¿¨
-	if (ImGui::BeginTabBar(u8"Ñ¡Ïî¿¨"))
+	//æ–°å»ºé€‰é¡¹å¡
+	if (ImGui::BeginTabBar(u8"é€‰é¡¹å¡"))
 	{
 
-		//Ñ¡Ïî±êÇ©
-		if (ImGui::BeginTabItem(u8"ÊÓ¾õÑ¡Ïî"))
+		//é€‰é¡¹æ ‡ç­¾
+		if (ImGui::BeginTabItem(u8"è§†è§‰é€‰é¡¹"))
 		{
-			//ImGui::Text(u8"There is Ñ¡Ïî±êÇ© 1");
-			ImGui::Checkbox(u8"»æÖÆ×Ü¿ª¹Ø", &Menu::util»æÖÆ×Ü¿ª¹Ø);
-			ImGui::Checkbox(u8"»æÖÆ×¼ĞÄ", &Menu::vis»æÖÆ×¼ĞÄ);
-			ImGui::Checkbox(u8"»æÖÆ2D·½¿ò", &Menu::vis·½¿òÍ¸ÊÓ);
-			//ImGui::Checkbox(u8"»æÖÆ¶¯Ì¬2D·½¿ò", &Menu::DrawDynamicESP);
-			ImGui::Checkbox(u8"»æÖÆ3D·½¿ò", &Menu::vis3DBoxÍ¸ÊÓ);
-			ImGui::Checkbox(u8"»æÖÆÑªÁ¿", &Menu::vis»æÖÆÑªÌõ);
-			//ImGui::Checkbox(u8"»æÖÆÁ¬Ïß", &Menu::DrawLine);
-			ImGui::Checkbox(u8"»æÖÆ¾àÀë", &Menu::vis»æÖÆ¾àÀë);
-			ImGui::Checkbox(u8"»æÖÆ¹Ç÷À", &Menu::vis»æÖÆ¹Ç÷À);
+			//ImGui::Text(u8"There is é€‰é¡¹æ ‡ç­¾ 1");
+			ImGui::Checkbox(u8"ç»˜åˆ¶æ€»å¼€å…³", &Menu::utilç»˜åˆ¶æ€»å¼€å…³);
+			ImGui::Checkbox(u8"ç»˜åˆ¶å‡†å¿ƒ", &Menu::visç»˜åˆ¶å‡†å¿ƒ);
+			ImGui::Checkbox(u8"ç»˜åˆ¶2Dæ–¹æ¡†", &Menu::visæ–¹æ¡†é€è§†);
+			//ImGui::Checkbox(u8"ç»˜åˆ¶åŠ¨æ€2Dæ–¹æ¡†", &Menu::DrawDynamicESP);
+			ImGui::Checkbox(u8"ç»˜åˆ¶3Dæ–¹æ¡†", &Menu::vis3DBoxé€è§†);
+			ImGui::Checkbox(u8"ç»˜åˆ¶è¡€é‡", &Menu::visç»˜åˆ¶è¡€æ¡);
+			//ImGui::Checkbox(u8"ç»˜åˆ¶è¿çº¿", &Menu::DrawLine);
+			ImGui::Checkbox(u8"ç»˜åˆ¶è·ç¦»", &Menu::visç»˜åˆ¶è·ç¦»);
+			ImGui::Checkbox(u8"ç»˜åˆ¶éª¨éª¼", &Menu::visç»˜åˆ¶éª¨éª¼);
 
-			//ImGui::Checkbox(u8"»æÖÆ3D·½¿ò", &Menu::DrawDynamicESP);
+			//ImGui::Checkbox(u8"ç»˜åˆ¶3Dæ–¹æ¡†", &Menu::DrawDynamicESP);
 
 
 
-			//»¬¿é
-			//ImGui::SliderFloat(u8"»¬¿é1", &temp5, 0.f, 100.f, "%.1f");
+			//æ»‘å—
+			//ImGui::SliderFloat(u8"æ»‘å—1", &temp5, 0.f, 100.f, "%.1f");
 
 			ImGui::EndTabItem();
 		}
-		if (ImGui::BeginTabItem(u8"Ãé×¼"))
+		if (ImGui::BeginTabItem(u8"ç„å‡†"))
 		{
-			//ImGui::Text(u8"There is Ñ¡Ïî±êÇ© 2");
-			ImGui::Checkbox(u8"»æÖÆFOV", &Menu::aim»æÖÆFOV);
-			//ImGui::Checkbox(u8"¿ÉÊÓÅĞ¶Ï", &Menu::aim¿ÉÊÓÅĞ¶Ï);
-			ImGui::Text(u8"°â»úºÍºó×ù²¹³¥²»ÒªÍ¬Ê±¿ªÆô");
-			ImGui::Checkbox(u8"×ÔÃé", &Menu::aim×ÔÃé);
+			//ImGui::Text(u8"There is é€‰é¡¹æ ‡ç­¾ 2");
+			ImGui::Checkbox(u8"ç»˜åˆ¶FOV", &Menu::aimç»˜åˆ¶FOV);
+			//ImGui::Checkbox(u8"å¯è§†åˆ¤æ–­", &Menu::aimå¯è§†åˆ¤æ–­);
+			ImGui::Text(u8"æ‰³æœºå’Œååº§è¡¥å¿ä¸è¦åŒæ—¶å¼€å¯");
+			ImGui::Checkbox(u8"è‡ªç„", &Menu::aimè‡ªç„);
 			ImGui::SameLine();
-			ImGui::Checkbox(u8"°â»ú", &Menu::aim°â»ú);
+			ImGui::Checkbox(u8"æ‰³æœº", &Menu::aimæ‰³æœº);
 			ImGui::SameLine();
-			ImGui::Checkbox(u8"ºó×ù²¹³¥", &Menu::aimºó×ù²¹³¥);
+			ImGui::Checkbox(u8"ååº§è¡¥å¿", &Menu::aimååº§è¡¥å¿);
 
-			///ImGui::Combo(u8"×ÔÃéÈÈ¼ü", &Menu::DefaultAimHotKey, Menu::aimHotKey, IM_ARRAYSIZE(Menu::aimHotKey));
-			//ImGui::Combo(u8"°â»úÈÈ¼ü", &Menu::DefaultTriggleHotKey, Menu::TriggleHotKey, IM_ARRAYSIZE(Menu::TriggleHotKey));
+			///ImGui::Combo(u8"è‡ªç„çƒ­é”®", &Menu::DefaultAimHotKey, Menu::aimHotKey, IM_ARRAYSIZE(Menu::aimHotKey));
+			//ImGui::Combo(u8"æ‰³æœºçƒ­é”®", &Menu::DefaultTriggleHotKey, Menu::TriggleHotKey, IM_ARRAYSIZE(Menu::TriggleHotKey));
 
-			ImGui::Text(isListeningForAimKey ? u8"µÈ´ıÉèÖÃÈÈ¼ü..." : u8"×ÔÃéÈÈ¼ü: %d", Menu::aimKey);
-			if (ImGui::Button(u8"ÇĞ»»×ÔÃéÈÈ¼ü"))
+			ImGui::Text(isListeningForAimKey ? u8"ç­‰å¾…è®¾ç½®çƒ­é”®..." : u8"è‡ªç„çƒ­é”®: %d", Menu::aimKey);
+			if (ImGui::Button(u8"åˆ‡æ¢è‡ªç„çƒ­é”®"))
 				isListeningForAimKey = true;
 			if (isListeningForAimKey) {
 				int pressedKey = GetPressedKey();
@@ -84,8 +84,8 @@ void Menu::ShowMenu()
 					isListeningForAimKey = false;
 				}
 			}
-			ImGui::Text(isListeningForTriggerKey ? u8"µÈ´ıÉèÖÃÈÈ¼ü..." : u8"°â»úÈÈ¼ü: %d", Menu::triggerKey);
-			if (ImGui::Button(u8"ÇĞ»»°â»úÈÈ¼ü"))
+			ImGui::Text(isListeningForTriggerKey ? u8"ç­‰å¾…è®¾ç½®çƒ­é”®..." : u8"æ‰³æœºçƒ­é”®: %d", Menu::triggerKey);
+			if (ImGui::Button(u8"åˆ‡æ¢æ‰³æœºçƒ­é”®"))
 				isListeningForTriggerKey = true;
 			if (isListeningForTriggerKey) {
 				int pressedKey = GetPressedKey();
@@ -96,25 +96,60 @@ void Menu::ShowMenu()
 			}
 
 
-			ImGui::SliderInt(u8"ºó×ù²¹³¥X", &Menu::recoil_X, 0, 100, "%d");
-			ImGui::SliderInt(u8"ºó×ù²¹³¥Y", &Menu::recoil_Y, 0, 100, "%d");
+			ImGui::SliderInt(u8"ååº§è¡¥å¿X", &Menu::recoil_X, 0, 100, "%d");
+			ImGui::SliderInt(u8"ååº§è¡¥å¿Y", &Menu::recoil_Y, 0, 100, "%d");
 
-			ImGui::Text(u8"×ÔÃé²¿Î»");
-			ImGui::RadioButton(u8"Í·²¿", &Menu::AimLocation, Menu::AimLoc::Head);
+			ImGui::Text(u8"è‡ªç„éƒ¨ä½");
+			ImGui::RadioButton(u8"å¤´éƒ¨", &Menu::AimLocation, Menu::AimLoc::Head);
 			ImGui::SameLine();
-			ImGui::RadioButton(u8"ĞØ²¿", &Menu::AimLocation, Menu::AimLoc::Chest);
-			//ImGui::Checkbox(u8"»æÖÆÄ¿±êÁ¬Ïß", &Menu::DrawTarget);
-			ImGui::SliderFloat(u8"×ÔÃéFOV", &Menu::aimbotFOV, 30.f, 800.f, "%.1f");
-			ImGui::SliderInt(u8"Ãé×¼¾àÀë", &Menu::aimbotDis, 0, 500, "%d");
+			ImGui::RadioButton(u8"èƒ¸éƒ¨", &Menu::AimLocation, Menu::AimLoc::Chest);
+			//ImGui::Checkbox(u8"ç»˜åˆ¶ç›®æ ‡è¿çº¿", &Menu::DrawTarget);
+			ImGui::SliderFloat(u8"è‡ªç„FOV", &Menu::aimbotFOV, 30.f, 800.f, "%.1f");
+			ImGui::SliderInt(u8"ç„å‡†è·ç¦»", &Menu::aimbotDis, 0, 500, "%d");
 
-			ImGui::SliderFloat(u8"Êó±êÖÊÁ¿£¨Ô½´óÔ½Âı£©", &Menu::MASS, 5.f, 100.f, "%.1f");
-			ImGui::SliderFloat(u8"µ¯»É¸Õ¶È£¨Ô½´óÔ½¿ì£©", &Menu::SPRING_CONSTANT, 0.f, 3000.f, "%.1f");
-			ImGui::SliderFloat(u8"×èÄá£¨Ô½´óÊ§ËÙÔ½¿ì£©", &Menu::DAMPING_CONSTANT, 0.f, 1000.f, "%.1f");
-			//ImGui::SliderFloat(u8"ÒıÁ¦", &Menu::GRAVITY_CONSTANT, 0.f, 20.f, "%.1f");
-
-
+			ImGui::SliderFloat(u8"é¼ æ ‡è´¨é‡ï¼ˆè¶Šå¤§è¶Šæ…¢ï¼‰", &Menu::MASS, 5.f, 100.f, "%.1f");
+			ImGui::SliderFloat(u8"å¼¹ç°§åˆšåº¦ï¼ˆè¶Šå¤§è¶Šå¿«ï¼‰", &Menu::SPRING_CONSTANT, 0.f, 3000.f, "%.1f");
+			ImGui::SliderFloat(u8"é˜»å°¼ï¼ˆè¶Šå¤§å¤±é€Ÿè¶Šå¿«ï¼‰", &Menu::DAMPING_CONSTANT, 0.f, 1000.f, "%.1f");
+			//ImGui::SliderFloat(u8"å¼•åŠ›", &Menu::GRAVITY_CONSTANT, 0.f, 20.f, "%.1f");
 
 
+
+
+			ImGui::EndTabItem();
+		}
+
+		if (ImGui::BeginTabItem(u8"æŠ•æ·ç‰©è¾…åŠ©"))
+		{
+			static const char* grenadeTypes[] = { "Smoke", "Flash", "HE", "Decoy" };
+			static const char* throwTypes[] = { u8"ç«™æŠ•", u8"è·³æŠ•", u8"è·‘æŠ•" };
+
+			ImGui::Checkbox(u8"å¯ç”¨æŠ•æ·ç‰©è¾…åŠ©", &Menu::helperå¯ç”¨);
+			ImGui::Checkbox(u8"æŒ‰å½“å‰æ‰‹é›·ç±»å‹ç­›é€‰", &Menu::helperæŒ‰æ­¦å™¨ç­›é€‰);
+			ImGui::Checkbox(u8"ç»˜åˆ¶ç«™ä½", &Menu::helperç»˜åˆ¶ç«™ä½);
+			ImGui::Checkbox(u8"ç»˜åˆ¶ç„ç‚¹", &Menu::helperç»˜åˆ¶ç„ç‚¹);
+
+			ImGui::Separator();
+			ImGui::Checkbox(u8"æ‰‹åŠ¨è¦†ç›–æ‰‹é›·ç±»å‹", &Menu::helperæ‰‹åŠ¨ç±»å‹è¦†ç›–);
+			ImGui::Combo(u8"æ‰‹é›·ç±»å‹", &Menu::helperæ‰‹åŠ¨ç±»å‹, grenadeTypes, IM_ARRAYSIZE(grenadeTypes));
+			ImGui::Combo(u8"æŠ•æ·æ–¹å¼", &Menu::helperæŠ•æ·æ–¹å¼, throwTypes, IM_ARRAYSIZE(throwTypes));
+
+			ImGui::SliderFloat(u8"ç«™ä½åˆ¤å®šå®¹å·®", &Menu::helperç«™ä½å®¹å·®, 10.0f, 120.0f, "%.1f");
+			ImGui::SliderFloat(u8"èšç„¦åŠå¾„(åƒç´ )", &Menu::helperèšç„¦åŠå¾„, 20.0f, 100.0f, "%.1f");
+			ImGui::SliderFloat(u8"ç«™ä½æœ€å¤§ç»˜åˆ¶è·ç¦»", &Menu::helperç«™ä½æœ€è¿œç»˜åˆ¶, 500.0f, 5000.0f, "%.0f");
+			ImGui::SliderFloat(u8"éèšç„¦å¼•å¯¼çº¿é˜ˆå€¼", &Menu::helperéèšç„¦å¼•å¯¼çº¿è·ç¦», 50.0f, 8000.0f, "%.0f");
+			ImGui::SliderFloat(u8"è®°å½•ç„ç‚¹è·ç¦»", &Menu::helperè®°å½•ç„ç‚¹è·ç¦», 2000.0f, 20000.0f, "%.0f");
+
+			ImGui::Separator();
+			ImGui::InputText(u8"åœ°å›¾å", Menu::helperåœ°å›¾å, IM_ARRAYSIZE(Menu::helperåœ°å›¾å));
+			ImGui::InputText(u8"å¤‡æ³¨", Menu::helperå¤‡æ³¨, IM_ARRAYSIZE(Menu::helperå¤‡æ³¨));
+
+			if (ImGui::Button(u8"è®°å½•å½“å‰ç‚¹ä½"))
+				Menu::helperè¯·æ±‚è®°å½• = true;
+			ImGui::SameLine();
+			if (ImGui::Button(u8"åˆ·æ–°åœ°å›¾ç‚¹ä½"))
+				Menu::helperè¯·æ±‚åˆ·æ–° = true;
+
+			ImGui::TextWrapped(u8"çŠ¶æ€: %s", Menu::helperçŠ¶æ€.c_str());
 			ImGui::EndTabItem();
 		}
 

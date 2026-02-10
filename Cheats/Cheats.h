@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "GameState.h"
 #include "OffsetsData.h"
@@ -26,6 +27,23 @@ namespace Cheats
 		int upperarm_r = 13, lowerarm_r = 14, hand_r = 16;
 		int calf_l = 24, thigh_l = 23, hip2 = 0;
 		int thigh_r = 26, calf_r = 27;
+	};
+
+	struct GrenadeSpot
+	{
+		int id = 0;
+		std::string type{};
+		std::string name{};
+		std::string throwType{};
+		Vector standPos{};
+		Vector aimPos{};
+	};
+
+	struct GrenadeMapData
+	{
+		std::string mapName{};
+		std::vector<GrenadeSpot> spots{};
+		std::uint64_t revision = 0;
 	};
 
 	class Game
@@ -72,10 +90,31 @@ namespace Cheats
 
 		// 通过模块名查找目标进程模块基址。
 		uintptr_t BindModule(DWORD pid, std::wstring_view name);
+		// 读取CS2全局变量中的当前地图名。
+		std::string ReadCurrentMapName() const;
+		// 读取当前手持道具类型（Smoke/Flash/HE/Decoy/Unknown）。
+		std::string ReadCurrentGrenadeType(const RawState& raw) const;
+		// 将投掷角度转换为远点世界坐标（Method 2）。
+		Vector ComputeFarAimPoint(const Vector& eyePos, float pitchDeg, float yawDeg, float distance) const;
+		// 处理菜单触发的“记录点位”请求。
+		void TryRecordGrenadeSpot(const RawState& raw, const SettingsSnapshot& settings);
+		// 重载指定地图的点位缓存。
+		bool ReloadGrenadeMap(const std::string& mapName, std::string& error);
+		// 如地图变化则自动重载点位。
+		void EnsureGrenadeMapLoaded(const std::string& mapName);
+		// 渲染投掷物辅助引导。
+		void RenderGrenadeHelper(const RawState& raw, const SettingsSnapshot& settings) const;
+		// 读取地图JSON点位文件。
+		bool LoadGrenadeJsonFile(const std::string& filePath, GrenadeMapData& out, std::string& error) const;
+		// 追加点位到地图JSON文件。
+		bool AppendGrenadeSpotToJson(const std::string& filePath,
+			const std::string& mapName,
+			const GrenadeSpot& spot,
+			std::string& error) const;
 
 		template <typename T>
 		// 读取目标进程指定地址并按模板类型返回结果。
-		T Read(uintptr_t address)
+		T Read(uintptr_t address) const
 		{
 			T buffer{};
 			ReadProcessMemory(gamehandle, reinterpret_cast<void*>(address), &buffer, sizeof(T), nullptr);
@@ -108,9 +147,15 @@ namespace Cheats
 		std::mutex readMutex{};
 		std::mutex espMutex{};
 		std::mutex aimMutex{};
+		mutable std::mutex grenadeMutex{};
 		std::condition_variable readCv{};
 		std::condition_variable espCv{};
 		std::condition_variable aimCv{};
+
+		GrenadeMapData grenadeData{};
+		std::string loadedGrenadeMap{};
+		std::string grenadeStatus = u8"未加载点位";
+		std::uint64_t grenadeRevision = 0;
 
 		bool initAttempted = false;
 		bool initOk = false;
