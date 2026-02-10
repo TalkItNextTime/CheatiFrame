@@ -1,797 +1,904 @@
-#include "Cheats.h"
+ï»¿#include "Cheats.h"
 
-#define PI 3.14159265358979323846
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <limits>
 
+#include "../Visuals/Menu.h"
+#include "../Visuals/External.h"
+#include "OffsetsLoader.h"
+#include "AlgorAim.h"
 
+constexpr float kPi = 3.14159265358979323846f;
 
-	void Cheats::CheatMain()
+namespace
+{
+	using Cheats::ScreenSize;
+	using Cheats::EspPlayer;
+	using Cheats::kBoneCount;
+
+	// åˆ¤æ–­æŒ‡å®šå±å¹•åæ ‡æ˜¯å¦ä½äºçª—å£èŒƒå›´å†…ã€‚
+	bool InScreen(const ScreenSize& screen, float x, float y)
 	{
-		//»ñÈ¡µ±ÏÂÊ±¼ä
-		static std::chrono::time_point time1 = std::chrono::steady_clock::now();
-		auto time2 = std::chrono::steady_clock::now();
-
-		
-		//time2 - time1 >= std::chrono::milliseconds(500)
-
-		if (GetAsyncKeyState(VK_INSERT) && time2 - time1 >= std::chrono::milliseconds(200))//²Ëµ¥ºô³öÈÈ¼ü
-		{
-			Menu::DisplayToggle = !Menu::DisplayToggle;
-			time1 = time2;
-
-		}
-
-		//ÏÔÊ¾²Ëµ¥
-		if (Menu::DisplayToggle)
-		{
-			Menu::ShowMenu();
-		}
-
-		if (GetAsyncKeyState(VK_END) & 0x8000)
-		{
-			exit(0);
-		}
-
-		//¹¦ÄÜº¯Êıµ÷ÓÃ
-		//³õÊ¼»¯Ò»´Î
-		static bool b = true;
-		if (b)
-		{
-			if (!Cheats::gameName.CheatInit())
-				return;
-			b = !b;
-		}
-
-		 
-
-		Cheats::gameName.CheatLoop();
-
+		return x >= 0.0f && y >= 0.0f && x <= screen.x && y <= screen.y;
 	}
 
-	bool Cheats::Game::CheatInit()
+	// è®¡ç®—å±å¹•ä¸­å¿ƒç‚¹ï¼ˆå‡†æ˜Ÿä¸­å¿ƒï¼‰åæ ‡ã€‚
+	Vector GetCross(const ScreenSize& screen)
 	{
-		gamehandle = OpenProcess(PROCESS_ALL_ACCESS, false, Visual::external.gamewindow.pid);
-		if (gamehandle == NULL)
-		{
-			printf("´ò¿ªÓÎÏ·½ø³Ì¾ä±úÊ§°Ü£¬³¢ÊÔ¹ÜÀíÔ±ÔËĞĞ£¡\r\n");
+		return { screen.x * 0.5f, screen.y * 0.5f, 0.0f };
+	}
+
+	// å°†3Dä¸–ç•Œåæ ‡æŠ•å½±åˆ°2Då±å¹•åæ ‡ï¼Œå¤±è´¥æ—¶è¿”å› falseã€‚
+	bool WorldToScreen(const Vector& world, const view_matrix_t& matrix, const ScreenSize& screen, Vector& out)
+	{
+		float x = matrix[0][0] * world.x + matrix[0][1] * world.y + matrix[0][2] * world.z + matrix[0][3];
+		float y = matrix[1][0] * world.x + matrix[1][1] * world.y + matrix[1][2] * world.z + matrix[1][3];
+		float w = matrix[3][0] * world.x + matrix[3][1] * world.y + matrix[3][2] * world.z + matrix[3][3];
+
+		if (w < 0.1f)
 			return false;
-		}
 
-		//»ñÈ¡Ä£¿éµØÖ·
-		client = bind_modules(Visual::external.gamewindow.pid, "client.dll");
-		if (client == NULL)
-		{
-			CloseHandle(gamehandle);
-			return false;
-		}
+		float inv = 1.0f / w;
+		x *= inv;
+		y *= inv;
 
-		//³õÊ¼»¯entityList
-		entityList = Read<uintptr_t>(client + offsets::dwEntityList);
-		if (entityList == NULL)
-		{
-			printf("Ã»¶Áµ½entityList\r\n");
-			return false;
-		}
+		float screenX = screen.x * 0.5f;
+		float screenY = screen.y * 0.5f;
 
+		screenX += 0.5f * x * screen.x + 0.5f;
+		screenY -= 0.5f * y * screen.y + 0.5f;
 
-
-
+		out = { screenX, screenY, w };
 		return true;
 	}
 
-	void Cheats::Game::CheatLoop() //±éÀúĞÅÏ¢
+	// æŒ‰éª¨éª¼æ•°ç»„åŒºé—´è¿æ¥çº¿æ®µï¼Œç”¨äºç»˜åˆ¶éª¨æ¶ã€‚
+	void ConnectBones(const EspPlayer& player, const ScreenSize& screen, int begin, int end)
 	{
-		static std::chrono::time_point time1 = std::chrono::steady_clock::now();
-		auto time2 = std::chrono::steady_clock::now();
-		//±éÀúËùÓĞÈË
-		
-		for (int i = 0; i < 64; i++)
+		Vector oldPoint{};
+		for (int i = begin; i <= end; ++i)
 		{
-			if (!UpdateLocalInfo())										//¸üĞÂ±¾µØÍæ¼ÒĞÅÏ¢
-				return;
-
-			if (!UpdateMatrix())										//¸üĞÂ¾ØÕóĞÅÏ¢
-				return;
-
-			if (!UpdatePlayerInfo(i))									//¸üĞÂÆäËûÍæ¼ÒĞÅÏ¢
-				continue;												//µ±Ç°Íæ¼ÒĞÅÏ¢²»´æÔÚ¾ÍÌø¹ı
-
-			if (!Calc2DBoxPos())										//¼ÆËã2D·½¿ò´óĞ¡
-				continue;
-
-			if (!UpdateBones())											//¸üĞÂ¹Ç÷À×ø±ê
-				continue;
-
-			EnterAimQueue();											//½øÈë×ÔÃé¶ÓÁĞ
-			
-
-			if (Menu::util»æÖÆ×Ü¿ª¹Ø && Menu::vis»æÖÆ¹Ç÷À)				//»æÖÆ¹Ç÷À
-				DrawBones();
-
-			if (Menu::util»æÖÆ×Ü¿ª¹Ø && Menu::vis·½¿òÍ¸ÊÓ)				//»æÖÆ2D·½¿ò
-				DrawESP2D();
-
-			if (Menu::util»æÖÆ×Ü¿ª¹Ø && Menu::vis3DBoxÍ¸ÊÓ)				//»æÖÆ3D·½¿ò
-				Draw3DBox();
-
-			if (Menu::util»æÖÆ×Ü¿ª¹Ø && Menu::vis»æÖÆÑªÌõ)				//»æÖÆÑªÌõ
-				DrawHealth();
-
-			if (Menu::util»æÖÆ×Ü¿ª¹Ø && Menu::vis»æÖÆ¾àÀë)				//»æÖÆ¾àÀë
-				DrawDistance();
-
-
-				
-			
-
-		}
-		crosshair_ent = getiIDEntIndex();
-		//printf("switchTarget: %d \r\n", Menu::switchTarget);
-		GetTargetInfo();
-
-		//printf("aim_punch: %f  %f\r\n", aim_punch.x, aim_punch.y);
-		//printf("recoilPos: %f  %f\r\n", recoilPos.x, recoilPos.y);
-
-		recoilCompensation();
-		if (Menu::util»æÖÆ×Ü¿ª¹Ø && Menu::aim»æÖÆFOV)					//»æÖÆFOV
-			DrawFov();
-		if (Menu::aim°â»ú && GetAsyncKeyState(Menu::triggerKey) && !Menu::DisplayToggle)//°â»ú
-			TriggerBot();
-									
-		if (Menu::aim×ÔÃé && GetAsyncKeyState(Menu::aimKey) & 0x8000 && target_info.dis2Cross <= Menu::aimbotFOV && !Menu::DisplayToggle)
-			Aimbot();													//×ÔÃé
-		if (Menu::vis»æÖÆ×¼ĞÄ)
-			DrawCross();												//×¼ĞÄ
-		if (crosshair_ent && crosshair_ent != -1)
-		{
-			char buff[256];
-			sprintf_s(buff, u8"×¼ĞÄid:%d ¿ÉÒÔÉä»÷", crosshair_ent);
-			ImGui::GetBackgroundDrawList()->AddText({ Visual::external.gamewindow.size.x / 2 - 120,150 }, ImColor(255, 0, 0), buff);
-			ImGui::GetBackgroundDrawList()->AddCircleFilled({ Visual::external.gamewindow.size.x / 2,200 }, 10, ImColor(255, 0, 0));
-		}
-		//if (GetAsyncKeyState(VK_LBUTTON)) 
-		//{
-		//	Vector aim_punch = getAimPunch();
-		//	printf("aim_punch: %f  %f\r\n", aim_punch.x, aim_punch.y);
-		//}
-		//if (Menu::aimºó×ù²¹³¥ && GetAsyncKeyState(VK_LBUTTON) && getShots())
-		//{
-		//	recoilMove(recoilPos.x, recoilPos.y);						//²¹³¥Ñ¹Ç¹
-		//}
-	}
-
-
-
-
-
-
-
-
-
-
-
-	uintptr_t Cheats::Game::bind_modules(DWORD pid, std::string_view mname)
-	{
-		HANDLE _handle = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);//±éÀú¾ä±ú
-		MODULEENTRY32 mod;
-		mod.dwSize = sizeof mod;
-		for (Module32First(_handle, &mod); Module32Next(_handle, &mod);)//±éÀúÄ£¿é
-		{
-			if (mname.compare(mod.szModule) == 0)//¶Ô±ÈÄ£¿éÃûÊÇ·ñ·ûºÏÄ¿±êÄ£¿éÃû
+			if (player.screenBones[i].z > 0.0f && InScreen(screen, player.screenBones[i].x, player.screenBones[i].y))
 			{
-				
-				printf("%s Address = %llx \r\n", mname.data(),mod.modBaseAddr);
-				return (uintptr_t)mod.modBaseAddr;
+				if (i != begin)
+				{
+					ImGui::GetBackgroundDrawList()->AddLine(
+						{ oldPoint.x, oldPoint.y },
+						{ player.screenBones[i].x, player.screenBones[i].y },
+						ImColor(255, 255, 255));
+				}
+				oldPoint = { player.screenBones[i].x, player.screenBones[i].y };
 			}
 		}
-		if (mod.modBaseAddr == 0x0)
-		{
-			printf("Ã»ÕÒµ½%sÄ£¿é,Çë¼ì²éÄ£¿éÃûÊÇ·ñÕıÈ·\r\n", mname.data());
-			throw std::exception("Ä£¿é»ùÖ·Îª¿Õ£¡");
-		}
 	}
 
-	bool Cheats::Game::UpdateLocalInfo()
+	// ç»˜åˆ¶2Dæ–¹æ¡†ESPã€‚
+	void DrawEsp2D(const EspPlayer& player, const ScreenSize& screen)
 	{
-		//¶Á×ÔÉí»ùÖ·
-		pLocal.pAddr = Read<uintptr_t>(client + offsets::dwLocalPlayerPawn);
-		if (pLocal.pAddr == NULL)
-		{
-			printf("Î´ÄÜ¶ÁÈ¡µ½×ÔÉí»ùÖ·\r\n");
-			return false;
-		}
-		//printf("×ÔÉí»ùÖ·£º%llx\r\n", pLocal.pAddr);
-		//×ø±ê
-		pLocal.origin = Read<Vector>(pLocal.pAddr + offsets::m_vOldOrigin);
-		//printf("×ÔÉí×ø±êx£º%f\r\n", pLocal.origin.x);
-		//printf("×ÔÉí×ø±êy£º%f\r\n", pLocal.origin.y);
-		//printf("×ÔÉí×ø±êz£º%f\r\n", pLocal.origin.z);
-		//¶ÓÎé
-		pLocal.team = Read<int>(pLocal.pAddr + offsets::m_iTeamNum);
-
-		return true;
-	}
-
-	bool Cheats::Game::UpdatePlayerInfo(int index)
-	{
-		
-
-		//¶ÁµĞÈË»ùÖ·
-		list_entry1 = Read<uintptr_t>(entityList + (8 * (index & 0x7FFF) >> 9) + 16);
-		if (!list_entry1)
-			return false;
-		playerController = Read<uintptr_t>(list_entry1 + 120 * (index & 0x1FF));
-		if (!playerController)
-			return false;
-		playerPawn = Read<uint32_t>(playerController + offsets::m_hPlayerPawn);
-		if (!playerPawn)
-			return false;
-		list_entry2 = Read<uintptr_t>(entityList + 0x8 * ((playerPawn & 0x7FFF) >> 9) + 16);
-		if (!list_entry2)
-			return false;
-		pCSPlayerPawnPtr = Read<uintptr_t>(list_entry2 + 120 * (playerPawn & 0x1FF));
-		if (!pCSPlayerPawnPtr)
-			return false;
-		player.pAddr = pCSPlayerPawnPtr;
-		//printf("µĞÈË»ùÖ·£º%llx\r\n", player.pAddr);
-		if (player.pAddr == NULL || player.pAddr == pLocal.pAddr)
-			return false;;												//¶Áµ½×Ô¼ºµÄĞÅÏ¢ÂÔ¹ı
-
-		//¶ÓÎé
-		player.team = Read<int>(player.pAddr + offsets::m_iTeamNum);
-		if (player.team == NULL)
-		{
-			printf("Ã»¶Áµ½¸Ã½ÇÉ«team\r\n");
-			return false;
-		}
-		if (Menu::utilÅĞ¶ÏÕóÓª && player.team == pLocal.team)
-		{
-			return false;
-		}
-
-		//´æ»î×´Ì¬
-		player.lifeState = Read<int>(player.pAddr + offsets::m_lifeState);
-		if (player.lifeState != 256)
-			return false;
-
-		//¿É¼ûĞÔ
-		if (Menu::util¿ÉÊÓ¼ì²é)
-		{
-			player.spotted = Read<bool>(player.pAddr + offsets::m_entitySpottedState + 0x08);
-		}
-		else
-		{
-			player.spotted = true;
-		}
-
-		//ÑªÁ¿
-		player.health = Read<int>(player.pAddr + offsets::m_iHealth);
-
-		//×ø±ê
-		player.origin = Read<Vector>(player.pAddr + offsets::m_vOldOrigin);
-		if (player.origin.x == NULL || player.origin.y == NULL || player.origin.z == NULL)
-		{
-			printf("Ã»¶Áµ½½ÇÉ«×ø±ê\r\n");
-			return false;
-		}
-
-		//¸©Ñö½Ç
-		player.pitch = Read<float>(player.pAddr + offsets::m_pitch);
-		//Æ«º½½Ç
-		player.yaw = Read<float>(player.pAddr + offsets::m_yaw);
-
-		//printf("½ÇÉ«¸©Ñö½Ç£º%f\r\n", player.pitch);
-		//printf("½ÇÉ«Æ«º½½Ç£º%f\r\n", player.yaw);
-
-		//¼ÆËãÓë±¾µØÍæ¼ÒµÄ¾àÀë
-		player.dis2LP = pLocal.origin.CalcDis2Point3D(player.origin);
-
-
-		return true;
-	}
-	
-	bool Cheats::Game::UpdateMatrix()
-	{
-		matrix = Read<view_matrix_t>(client + offsets::dwViewMatrix);
-		if (matrix[0][0] == NULL)
-		{
-			printf("¾ØÕó¶ÁÈ¡Ê§°Ü\r\n");
-			return false;
-		}
-
-		return true;
-	}
-
-	bool Cheats::Game::UpdateBones()
-	{
-		player.sceneNode = Read<uintptr_t>(player.pAddr + offsets::m_pGameSceneNode);
-		player.boneArr = Read<uintptr_t>(player.sceneNode + offsets::m_modelState + 0x80);  //¹Ç÷ÀÊı×é
-		player.head = Read<Vector>(player.boneArr + boneindex.head * 32); //head world origin
-		//printf("x:%f  y:%f  z:%f \r\n", player.head.x, player.head.y, player.head.z);
-		ZeroMemory(&player.WorldBoneArr, sizeof(player.WorldBoneArr));
-		ZeroMemory(&player.ScreenBoneArr, sizeof(player.ScreenBoneArr));
-		//ZeroMemory(&player.ScreenBone2Arr, sizeof(player.ScreenBone2Arr));
-
-		for (int i = 0; i < sizeof(BoneIndex) / sizeof(int); i++)
-		{
-			int number = *((int*)&boneindex + i);
-			//printf("%d\r\n", number);
-			player.WorldBoneArr[i] = Read<Vector>(player.boneArr + number * 32);
-
-			if (abs(player.WorldBoneArr[i].x - 0) <= 10.f || abs(player.WorldBoneArr[i].y - 0) <= 10.f || abs(player.WorldBoneArr[i].z - 0) <= 10.f)
-				continue;
-			//×ª»¯ÎªÆÁÄ»×ø±ê²¢±£´æ
-			player.ScreenBoneArr[i] = player.WorldBoneArr[i].world2screen(matrix);
-			//printf("BoneNumber:%d  x:%f  y:%f\r\n", number,player.ScreenBoneArr[i].x, player.ScreenBoneArr[i].y);
-			/*char buff[256];
-			sprintf_s(buff, "% d", number);
-			ImGui::GetBackgroundDrawList()->AddText({ player.ScreenBoneArr[i].x,player.ScreenBoneArr[i].y }, ImColor(255, 255, 255), buff);*/
-
-		}
-
-		//for (int i = 0; i < sizeof(boneConnections) / sizeof(boneConnections[0]); i++)
-		//{
-		//	int bone1 = boneConnections[i].bone1;
-		//	int bone2 = boneConnections[i].bone2;
-
-		//	Vector VectorBone1 = Read<Vector>(player.boneArr + bone1 * 32);
-		//	Vector VectorBone2 = Read<Vector>(player.boneArr + bone2 * 32);
-
-		//	player.ScreenBone1Arr[i] = VectorBone1.world2screen(matrix);
-		//	player.ScreenBone2Arr[i] = VectorBone2.world2screen(matrix);
-
-		//}
-		return true;
-	}
-
-	bool Cheats::Game::Calc2DBoxPos()
-	{
-		Vector head_temp;
-		Vector origin_screen = player.origin.world2screen(matrix);
-		head_temp = player.origin;
-		head_temp.z += 68.f;
-
-		Vector head_screen = head_temp.world2screen(matrix);
-		//head_temp.x = origin_temp.x;
-		//head_temp.y = origin_temp.y + 72.f;
-
-		player.espWidth = (origin_screen.y - head_screen.y) / 4.f;
-
-		player.ESP1.x = head_screen.x - player.espWidth;
-		player.ESP1.y = head_screen.y;
-
-		player.ESP2.x = origin_screen.x + player.espWidth;
-		player.ESP2.y = origin_screen.y;
-
-		return true;
-	}
-
-	void Cheats::Game::DrawESP2D()
-	{
-		if (!InScreen((player.ESP1.x + player.ESP2.x) / 2, (player.ESP1.y + player.ESP2.y) / 2)) //µ±ÈËÎï2D·½¿òµÄÖĞĞÄ²»ÔÚÆÁÄ»ÄÚÊ±Ôò²»»­¿ò
+		if (!player.hasBox2d)
 			return;
 
-		ImGui::GetBackgroundDrawList()->AddRect({ player.ESP1.x ,player.ESP1.y }, { player.ESP2.x, player.ESP2.y }, ImColor(255, 0, 0));
+		const float centerX = (player.esp1.x + player.esp2.x) * 0.5f;
+		const float centerY = (player.esp1.y + player.esp2.y) * 0.5f;
+		if (!InScreen(screen, centerX, centerY))
+			return;
 
+		ImGui::GetBackgroundDrawList()->AddRect(
+			{ player.esp1.x, player.esp1.y },
+			{ player.esp2.x, player.esp2.y },
+			ImColor(255, 0, 0));
 	}
 
-	void Cheats::Game::DrawHealth()
+	// ç»˜åˆ¶è¡€é‡æ¡ï¼Œå¹¶æŒ‰è¡€é‡åˆ‡æ¢é¢œè‰²ã€‚
+	void DrawHealth(const EspPlayer& player)
 	{
-		ImColor healthColor = ImColor(0, 255, 0);
+		if (!player.hasBox2d)
+			return;
 
+		ImColor healthColor = ImColor(0, 255, 0);
 		if (player.health < 60)
 			healthColor = ImColor(255, 255, 0);
 		if (player.health < 30)
 			healthColor = ImColor(255, 0, 0);
 
-		float height = (player.health / 100.f) * (player.ESP1.y - player.ESP2.y);
-		ImGui::GetBackgroundDrawList()->AddRect({ player.ESP1.x - 7,player.ESP1.y }, { player.ESP1.x - 2,player.ESP2.y }, ImColor(0, 0, 0));
-		ImGui::GetBackgroundDrawList()->AddRectFilled({ player.ESP1.x - 3,player.ESP2.y + height }, { player.ESP1.x - 6,player.ESP2.y }, healthColor);
-
+		float height = (player.health / 100.0f) * (player.esp1.y - player.esp2.y);
+		ImGui::GetBackgroundDrawList()->AddRect(
+			{ player.esp1.x - 7, player.esp1.y },
+			{ player.esp1.x - 2, player.esp2.y },
+			ImColor(0, 0, 0));
+		ImGui::GetBackgroundDrawList()->AddRectFilled(
+			{ player.esp1.x - 3, player.esp2.y + height },
+			{ player.esp1.x - 6, player.esp2.y },
+			healthColor);
 	}
 
-	void Cheats::Game::Draw3DBox()
+	// åœ¨ç›®æ ‡ä¸‹æ–¹ç»˜åˆ¶ä¸æœ¬åœ°ç©å®¶è·ç¦»ï¼ˆç±³ï¼‰ã€‚
+	void DrawDistance(const EspPlayer& player, const ScreenSize& screen)
 	{
-
-		Vector TopPos3DArray[4], BottomPos3DArray[4];  //4¸ö¶¥²¿ÊÀ½ç×ø±êºÍ4¸öµ×²¿ÊÀ½ç×ø±ê
-		Vector TopPos2DArray[4], BottomPos2DArray[4];  //4¸ö¶¥²¿ÆÁÄ»×ø±êºÍ4¸öµ×²¿ÆÁÄ»×ø±ê
-		ImColor color = ImColor(255, 0, 0);
-		ImColor frontcolor = ImColor(255, 255, 0);		//³¯ÏòÄÇÃæ»æÖÆÁ¬ÏßµÄÑÕÉ«
-
-		float head_z = player.origin.z + 68.f;//Í·²¿z
-
-
-		if (!InScreen((player.ESP1.x + player.ESP2.x)/2.f, (player.ESP1.y+ player.ESP2.y)/2.f))
+		if (!player.hasBox2d)
 			return;
 
-		for (int i = 0; i < 4; i++)
+		char buff[64];
+		sprintf_s(buff, "%.f m", player.dis2LP / 75.0f);
+		const float textX = (player.esp1.x + player.esp2.x) / 2.05f;
+		const float textY = player.esp2.y;
+		if (InScreen(screen, textX, textY))
+			ImGui::GetBackgroundDrawList()->AddText({ textX, textY }, ImColor(255, 255, 255), buff);
+	}
+
+	// ç»˜åˆ¶éª¨éª¼è¿çº¿ä¸å¤´éƒ¨åœ†åœˆã€‚
+	void DrawBones(const EspPlayer& player, const ScreenSize& screen)
+	{
+		ConnectBones(player, screen, 0, 2);
+		ConnectBones(player, screen, 3, 9);
+		ConnectBones(player, screen, 10, 14);
+
+		if (player.headScreen.z > 0.0f && player.originScreen.z > 0.0f)
 		{
-			//ÒÔÈËÎïÊÓ½ÇÆ«ÒÆ+45¶È
-			int offset = 45 + i * 90;
-
-			// »ñÈ¡8¸öµã·Ö±ğÊÇ£º°üÎ§ÈËÎïµÄ×îÏÂÃæ4¸öµãºÍ×îÉÏÃæ4¸öµã·Ö±ğÔÚÈËÎïÊÓ½ÇµÄ45 135 225 315¶ÈÒ»´ÎforÑ­»·»ñÈ¡2¸öµã
-			//ÒòÎªcos£¨¦Á»¡¶È£©= x / Ğ±±ß  ËùÒÔx = cos£¨¦Á»¡¶È£©*Ğ±±ß  Í¬Àíy = sin£¨¦Á»¡¶È£© * Ğ±±ß  Õâµ¥Ğ±±ß³¤¶È×Ô¶¨ÒåÎª55
-			//cos£¨£©¼ÆËã³öµÄÖµ¾ÍÊÇµ¥Î»ÏòÁ¿1¶ÔÓ¦xµÄÖµ  Í¬Àísin£¨£©¼ÆËã³öµÄÖµ¾ÍÊÇµ¥Î»ÏòÁ¿1µÄ¶ÔÓ¦yµÄÖµ *55¾ÍÊÇÄ£Äâµ±Ç°½Ç¶ÈÏòÁ¿ÖµÎª55µÄx£¬y×ø±ê
-			BottomPos3DArray[i].x = player.origin.x + cosf((player.yaw + offset) * PI / 180.f) * 25.f;
-			BottomPos3DArray[i].y = player.origin.y + sinf((player.yaw + offset) * PI / 180.f) * 25.f;
-			BottomPos3DArray[i].z = player.origin.z;
-
-			TopPos3DArray[i] = BottomPos3DArray[i];
-			TopPos3DArray[i].z = head_z;
-
-			//float tempworldBottom[3] = { BottomPos3DArray[i].x,BottomPos3DArray[i].y,BottomPos3DArray[i].z };
-			//float tempscreenBottom[2] = { BottomPos2DArray[i].x,BottomPos2DArray[i].y };
-			//float tempworldTop[3] = { TopPos3DArray[i].x, TopPos3DArray[i].y, TopPos3DArray[i].z };
-			//float tempscreenTop[2]{ TopPos2DArray[i].x, TopPos2DArray[i].y };
-
-
-
-			//½«8¸öÊÀ½ç×ø±ê×ª»»ÎªÆÁÄ»×ø±ê
-			BottomPos2DArray[i] = BottomPos3DArray[i].world2screen(matrix);
-			TopPos2DArray[i] = TopPos3DArray[i].world2screen(matrix);
-			//if (!WorldToScreen(tempworldBottom, tempscreenBottom) || !WorldToScreen(tempworldTop, tempscreenTop))
-			//	break;
-
-			//BottomPos2DArray[i].x = tempscreenBottom[0];
-			//BottomPos2DArray[i].y = tempscreenBottom[1];
-			//TopPos2DArray[i].x = tempscreenTop[0];
-			//TopPos2DArray[i].y = tempscreenTop[1];
-
-			//µã1£º½ÅÅÔ±ßµÄµã×ø±ê µã2£º¶ÔÓ¦×Å½ÅÅÔ±ßµÄ×ø±êµÄÍ·²¿ÅÔ±ßµÄ×ø±ê »æÖÆÊúÏß
-			if (i == 0 || i == 3)
+			float headHeight = (player.originScreen.y - player.headScreen.y) / 8.0f;
+			if (InScreen(screen, player.headScreen.x, player.headScreen.y))
 			{
-				ImGui::GetBackgroundDrawList()->AddLine({ BottomPos2DArray[i].x,BottomPos2DArray[i].y }, { TopPos2DArray[i].x,TopPos2DArray[i].y }, frontcolor, 1.2f);
+				ImGui::GetBackgroundDrawList()->AddCircle(
+					{ player.headScreen.x, player.headScreen.y },
+					headHeight - 3.0f,
+					ImColor(255, 255, 255));
 			}
-			else
-			{
-				ImGui::GetBackgroundDrawList()->AddLine({ BottomPos2DArray[i].x,BottomPos2DArray[i].y }, { TopPos2DArray[i].x,TopPos2DArray[i].y }, color);
-			}
-		
+		}
+	}
+
+	// ç»˜åˆ¶3DåŒ…å›´ç›’ï¼ˆé¡¶é¢/åº•é¢/ä¾§è¾¹ï¼‰ã€‚
+	void Draw3DBox(const EspPlayer& player)
+	{
+		if (!player.has3dBox)
+			return;
+
+		ImColor color = ImColor(255, 0, 0);
+		ImColor frontColor = ImColor(255, 255, 0);
+
+		for (int i = 0; i < 4; ++i)
+		{
+			const ImColor lineColor = (i == 0 || i == 3) ? frontColor : color;
+			ImGui::GetBackgroundDrawList()->AddLine(
+				{ player.box3dBottom[i].x, player.box3dBottom[i].y },
+				{ player.box3dTop[i].x, player.box3dTop[i].y },
+				lineColor,
+				1.2f);
+
 			if (i)
 			{
+				ImGui::GetBackgroundDrawList()->AddLine(
+					{ player.box3dBottom[i - 1].x, player.box3dBottom[i - 1].y },
+					{ player.box3dBottom[i].x, player.box3dBottom[i].y },
+					color);
 
-				//µã1£º¾ÉµÄxµã µã2£º¶à90¶ÈÍ¬Æ½ÃæµÄµã  »æÖÆ½ÅÅÔ±ßµÄÁ¬Ïß
-					ImGui::GetBackgroundDrawList()->AddLine({ BottomPos2DArray[i - 1].x,BottomPos2DArray[i - 1].y }, { BottomPos2DArray[i].x,BottomPos2DArray[i].y }, color);
+				ImGui::GetBackgroundDrawList()->AddLine(
+					{ player.box3dTop[i - 1].x, player.box3dTop[i - 1].y },
+					{ player.box3dTop[i].x, player.box3dTop[i].y },
+					color);
 
-				//Í¬Àí»æÖÆÍ·²¿Æ½ÃæµÄÁ¬Ïß
-					ImGui::GetBackgroundDrawList()->AddLine({ TopPos2DArray[i - 1].x,TopPos2DArray[i - 1].y }, { TopPos2DArray[i].x,TopPos2DArray[i].y }, color);
-
-				//Èç¹ûÊÇ×îºóÒ»´Î»æÖÆ ¾Í°Ñ315¶ÈºÍ×î³õµÄ45¶ÈµÄµãÁ¬ÆğÀ´ĞÎ³É¾ØĞÎ£¬Í·²¿Î»ÖÃÍ¬Àí
 				if (i == 3)
 				{
-					ImGui::GetBackgroundDrawList()->AddLine({ BottomPos2DArray[0].x,BottomPos2DArray[0].y }, { BottomPos2DArray[i].x,BottomPos2DArray[i].y }, frontcolor, 1.2f);
-					ImGui::GetBackgroundDrawList()->AddLine({ TopPos2DArray[0].x,TopPos2DArray[0].y }, { TopPos2DArray[i].x,TopPos2DArray[i].y }, frontcolor, 1.2f);
+					ImGui::GetBackgroundDrawList()->AddLine(
+						{ player.box3dBottom[0].x, player.box3dBottom[0].y },
+						{ player.box3dBottom[i].x, player.box3dBottom[i].y },
+						frontColor,
+						1.2f);
+					ImGui::GetBackgroundDrawList()->AddLine(
+						{ player.box3dTop[0].x, player.box3dTop[0].y },
+						{ player.box3dTop[i].x, player.box3dTop[i].y },
+						frontColor,
+						1.2f);
 				}
 			}
-			
 		}
-
 	}
 
-	void Cheats::Game::DrawDistance()
+	// ç»˜åˆ¶å±å¹•ä¸­å¿ƒåå­—å‡†æ˜Ÿã€‚
+	void DrawCross(const Vector& cross)
 	{
-		char buff[256];
-		sprintf_s(buff, "%.f m", player.dis2LP / 75.f);
-		if (InScreen((player.ESP1.x + player.ESP2.x) / 2.05f, player.ESP2.y))
-			ImGui::GetBackgroundDrawList()->AddText({ (player.ESP1.x + player.ESP2.x) / 2.05f,player.ESP2.y }, ImColor(255, 255, 255), buff);
+		ImGui::GetBackgroundDrawList()->AddLine({ cross.x - 10, cross.y }, { cross.x + 10, cross.y }, ImColor(255, 0, 0));
+		ImGui::GetBackgroundDrawList()->AddLine({ cross.x, cross.y - 10 }, { cross.x, cross.y + 10 }, ImColor(255, 0, 0));
 	}
 
-	void Cheats::Game::DrawFov()
+	// ç»˜åˆ¶è‡ªç„FOVåœ†ã€‚
+	void DrawFov(const Vector& center, float radius)
 	{
-		float mid_x = Visual::external.gamewindow.size.x * 0.5f;
-		float mid_y = Visual::external.gamewindow.size.y * 0.5f;
-		ImGui::GetBackgroundDrawList()->AddCircle({ mid_x,mid_y }, Menu::aimbotFOV, ImColor(255, 255, 255), 18);
-
+		ImGui::GetBackgroundDrawList()->AddCircle({ center.x, center.y }, radius, ImColor(255, 255, 255), 18);
 	}
 
-	void Cheats::Game::DrawBones()
+	// çº¿ç¨‹ç­‰å¾…å™¨ï¼šç­‰å¾…åŠŸèƒ½å¯ç”¨æˆ–ç¨‹åºé€€å‡ºã€‚
+	void WaitForEnable(std::atomic<bool>& enabled, std::condition_variable& cv, std::mutex& mutex, const std::atomic<bool>& running)
 	{
-		ConnectBones(0, 2);
-		ConnectBones(3, 9);
-		ConnectBones(10, 14);
-
-		Vector screenHead = player.head.world2screen(matrix);
-		Vector screenPos = player.origin.world2screen(matrix);
-		float headHeight = (screenPos.y - screenHead.y) / 8.f;
-
-		if (InScreen(screenHead.x, screenHead.y))
-			ImGui::GetBackgroundDrawList()->AddCircle({ screenHead.x,screenHead.y }, headHeight - 3, ImColor(255, 255, 255));
-
-	
-		//for (int i = 0; i < sizeof(boneConnections) / sizeof(boneConnections[0]); i++)
-		//{
-		//	if (InScreen(player.ScreenBone1Arr[i].x, player.ScreenBone1Arr[i].y) && InScreen(player.ScreenBone2Arr[i].x, player.ScreenBone2Arr[i].y))
-		//		ImGui::GetBackgroundDrawList()->AddLine({ player.ScreenBone1Arr[i].x, player.ScreenBone1Arr[i].y }, { player.ScreenBone2Arr[i].x, player.ScreenBone2Arr[i].y }, ImColor(255, 255, 255));
-		//}
-
-		//ImGui::GetBackgroundDrawList()->AddCircle({ player.ScreenBoneArr[0].x,player.ScreenBoneArr[0].y }, player.espWidth/2.f, ImColor(255, 255, 255));
-
-
-
+		std::unique_lock lock(mutex);
+		cv.wait(lock, [&] { return !running.load() || enabled.load(); });
 	}
+}
 
-	void Cheats::Game::ConnectBones(int begin, int end)
+namespace Cheats
+{
+	// å…¨å±€å…¥å£ï¼šå¤„ç†èœå•çƒ­é”®ã€é€€å‡ºçƒ­é”®å¹¶é©±åŠ¨æ¯å¸§é€»è¾‘ã€‚
+	void CheatMain()
 	{
-		Vector oldPoint;
-		for (int i = begin; i <= end; i++)
+		static auto lastToggle = std::chrono::steady_clock::now();
+		auto now = std::chrono::steady_clock::now();
+
+		if (GetAsyncKeyState(VK_INSERT) && now - lastToggle >= std::chrono::milliseconds(200))
 		{
-			if (InScreen(player.ScreenBoneArr[i].x, player.ScreenBoneArr[i].y))
-			{
-				if (i != begin)
-				{
-					ImGui::GetBackgroundDrawList()->AddLine({ oldPoint.x,oldPoint.y }, { player.ScreenBoneArr[i].x,player.ScreenBoneArr[i].y }, ImColor(255, 255, 255));
-				}
-				oldPoint = { player.ScreenBoneArr[i].x,player.ScreenBoneArr[i].y };
-			}
+			Menu::DisplayToggle = !Menu::DisplayToggle;
+			lastToggle = now;
 		}
-	}
 
-	void Cheats::Game::DrawCross()
-	{
-		Vector cross = GetCross();
+		if (Menu::DisplayToggle)
+			Menu::ShowMenu();
 
-		
-		ImGui::GetBackgroundDrawList()->AddLine({ cross.x - 10,cross.y }, { cross.x + 10,cross.y }, ImColor(255, 0, 0));
-		ImGui::GetBackgroundDrawList()->AddLine({ cross.x,cross.y - 10 }, { cross.x ,cross.y + 10 }, ImColor(255, 0, 0));
-		
-	}
-
-	void Cheats::Game::EnterAimQueue()
-	{
-		//if (Menu::aim×ÔÃé && GetAsyncKeyState(VK_XBUTTON2) & 0x8000)
-		//{
-		//	Menu::switchTarget = false;
-		//}
-		//else
-		//{
-		//	Menu::switchTarget = true;
-		//}
-
-		Vector cross = GetCross();
-
-		float x = player.ScreenBoneArr[Menu::AimLocation].x;
-		float y = player.ScreenBoneArr[Menu::AimLocation].y;
-		if (!InScreen(x, y))
-			return;
-
-		Vector targetPos = { x,y };//×ÔÃé²¿Î»µÄÆÁÄ»×ø±ê
-		player.dis2Cross = targetPos.CalculateDistanceToPoint2D(cross);
-		//printf("dis2Cross:%f \r\n", player.dis2Cross);
-		//printf("Spotted:%d \r\n", player.spotted);
-		//±È½Ï»ñÈ¡ÀëÊó±ê×î½üµÄ
-		if (player.dis2Cross < Menu::aimbotFOV &&
-			player.dis2LP <= Menu::aimbotDis * 75 &&
-			player.dis2Cross < tem_distance_to_crosshair)
+		if (GetAsyncKeyState(VK_END) & 0x8000)
 		{
-			tem_distance_to_crosshair = player.dis2Cross;
-			temp_target_info = player;
-			//aimTargetAddr = player.pAddr;
+			gameName.Shutdown();
+			exit(0);
 		}
+
+		gameName.CheatTick();
 	}
 
-	void Cheats::Game::GetTargetInfo()
+	// ä¸€æ¬¡æ€§åˆå§‹åŒ–ï¼šæ‰“å¼€è¿›ç¨‹ã€å®šä½æ¨¡å—ã€è¯»å–åç§»å¹¶å¯åŠ¨çº¿ç¨‹ã€‚
+	bool Game::CheatInit()
 	{
-		//¸øÕæÕıµÄ±äÁ¿¸³Öµ
-		distance_to_crosshair = tem_distance_to_crosshair;
-		target_info = temp_target_info;
-		tem_distance_to_crosshair = 99999.f;//»¹Ô­³õÊ¼Öµ
-		ZeroMemory(&temp_target_info, sizeof(temp_target_info));//Çå¿ÕÄÚ´æ¿é
-		//if (Menu::switchTarget)
-		//	ZeroMemory(&aimTargetAddr, sizeof(aimTargetAddr));//Çå¿ÕÄÚ´æ¿é
-	
-	}
+		if (initAttempted)
+			return initOk;
 
-	void Cheats::Game::Aimbot()
-	{
+		initAttempted = true;
 
-		if (target_info.pAddr != NULL && target_info.spotted)
+		gamehandle = OpenProcess(PROCESS_ALL_ACCESS, false, Visual::external.gamewindow.pid);
+		if (!gamehandle)
 		{
-
-
-			////ÒÔĞèÒª×ÔÃéµÄ¹Ç÷ÀµãxyzºÍ×Ô¼ºÉãÏñ»úxyzÀ´¼ÆËã¸©Ñö½ÇºÍÆ«º½½Ç
-			//float temp_x = target_info.WorldBoneArr[Menu::AimLocation].x - player.origin.x;
-			//float temp_y = target_info.WorldBoneArr[Menu::AimLocation].y - player.origin.y;
-			//float temp_z = target_info.WorldBoneArr[Menu::AimLocation].z - (player.origin.z + 60.f);
-			Vector cross = GetCross();
-			float new_x = 0.f;
-			float new_y = 0.f;
-			
-			if (Menu::aimºó×ù²¹³¥ && !Menu::DisplayToggle && getShots() > 1)
-			{
-
-				
-				new_x = target_info.ScreenBoneArr[Menu::AimLocation].x - recoilPos.x + Menu::recoil_X;
-				new_y = target_info.ScreenBoneArr[Menu::AimLocation].y - recoilPos.y + Menu::recoil_Y;
-			}
-			else
-			{
-				new_x = target_info.ScreenBoneArr[Menu::AimLocation].x - cross.x; // ÒÆ¶¯µÄĞÂ×ø±êµÈÓÚÃé×¼Ä¿±êËùÔÚÆÁÄ»µÄ×ø±ê¼õÈ¥ÆÁÄ»ÖĞĞÄµÄ×ø±ê
-				new_y = target_info.ScreenBoneArr[Menu::AimLocation].y - cross.y;
-			}
-
-
-			// ½«ĞÂµÄËã·¨¼¯³É½øÀ´
-			float currentMousePositionX = 0.0f; // ¼ÙÉèµ±Ç°Êó±êÎ»ÖÃÎª0
-			float currentMousePositionY = 0.0f; // ¼ÙÉèµ±Ç°Êó±êÎ»ÖÃÎª0
-
-			// µ÷ÓÃ¸üĞÂÊó±êÎ»ÖÃµÄº¯Êı
-			SpringAlgo(new_x, new_y, new_x, new_y, currentMousePositionX, currentMousePositionY, Menu::SPRING_CONSTANT, Menu::DAMPING_CONSTANT, Menu::GRAVITY_CONSTANT, Menu::MASS);
-
-			// ·¢ËÍÊó±êÒÆ¶¯ÊÂ¼ş
-			mouse_event(MOUSEEVENTF_MOVE, static_cast<LONG>(currentMousePositionX), static_cast<LONG>(currentMousePositionY), 0, 0);
-
-			//auto new_x = target_info.ScreenBoneArr[Menu::AimLocation].x - cross.x;
-			//auto new_y = target_info.ScreenBoneArr[Menu::AimLocation].y - cross.y;
-
-			//mouse_event(MOUSEEVENTF_MOVE, new_x, new_y, 0, 0);
-
-
-			////¼ÆËã¸©Ñö½ÇºÍÆ«º½½Ç
-			//float angle_pitch = -(atan2(temp_z, sqrt(temp_x * temp_x + temp_y * temp_y)) * 180.0f / PI);
-			//float angle_yaw = atan2(temp_y, temp_x) * 180.0f / PI;
-			//uintptr_t pitchAddr = client + offsets::aimbot_pitch;
-			//uintptr_t yawAddr = client + offsets::aimbot_yaw;
-			////printf("pitchAddr:%llx   yawAddr:%llx  \r\n", pitchAddr, yawAddr);
-
-			//Write(pitchAddr, angle_pitch);
-			//Write(yawAddr, angle_yaw);
-				
-
-
-		}
-
-	}
-
-	void Cheats::Game::TriggerBot()
-	{
-		if (crosshair_ent && crosshair_ent != -1)
-		{
-
-			std::uintptr_t list_entry = Read<std::uintptr_t>(entityList + 0x8 * (crosshair_ent >> 9) + 0x10);
-			if (!list_entry)
-			{
-				std::cout << "[-] List entry invalid\n";
-				return;
-			}
-			const auto entity_pawn = Read<std::uintptr_t>(list_entry + 120 * (crosshair_ent & 0x1FF));
-			if (!entity_pawn)
-			{
-				std::cout << "[-] Entity pawn is invalid\n";
-				return;
-			}
-			int entity_team = Read<int>(entity_pawn + offsets::m_iTeamNum);
-			//printf("×¼ĞÄÈËÎïÕóÓª£º%d\r\n", entity_team);
-			if (Menu::utilÅĞ¶ÏÕóÓª && pLocal.team == entity_team)
-				return;
-
-			mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);//Ä£ÄâÊó±êµ¥»÷
-			//Write<int>(client + offsets::attack, 65537);
-			//if (time2 - time1 >= std::chrono::milliseconds(1000))
-			//{
-			//	Write<int>(client + offsets::attack, 16777472);
-			//}
-		}
-		if (crosshair_ent == -1)
-		{
-			//Write<int>(client + offsets::attack, 16777472);
-			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-		}
-		else
-			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);	
-
-			//printf("getiIDEntIndex:%d\r\n", crosshair_ent);
-			//printf("attack code: %d\r\n", Read<int>(client + offsets::attack));
-			//recoilCompensation();
-			//if (recoilPos.y < 528.f && recoilPos.y != 0)
-			//{
-			//	mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-			//	return;
-			//}
-
-			
-			
-
-	}
-
-	int Cheats::Game::getShots()
-	{
-		return Read<int>(pLocal.pAddr + offsets::m_iShotsFired);
-	}
-
-	Vector Cheats::Game::getAimPunch()
-	{
-		return Read<Vector>(pLocal.pAddr + offsets::m_aimPunchAngle);
-		//return Read<Vector>(pLocal.pAddr + offsets::m_aimPunchCache);
-	}
-
-	void Cheats::Game::recoilCompensation()
-	{
-		if (getShots() > 1)
-		{
-			aim_punch = getAimPunch();
-			//printf("aim_punch: %f  %f\r\n", aim_punch.x, aim_punch.y);
-			recoilPos = GetCross();
-
-			const float alpha = 0.8;//»º¶¯ÏµÊı
-
-			recoilPos.x = recoilPos.x * (1 - alpha) + (GetCross().x - aim_punch.y * 10) * alpha;
-			recoilPos.y = recoilPos.y * (1 - alpha) + (GetCross().y + aim_punch.x * 10) * alpha;
-
-			
-
-			ImGui::GetBackgroundDrawList()->AddCircleFilled({ recoilPos.x - 2,recoilPos.y - 2 }, 6, ImColor(255, 255, 0));
-		}
-		else
-		{
-			recoilPos.x = 0;
-			recoilPos.y = 0;
-		}
-
-	}
-
-	void Cheats::Game::recoilMove(float x, float y)
-	{
-		if (Menu::aimºó×ù²¹³¥ && getShots())
-			recoilCompensation();
-
-		
-
-		Vector cross = GetCross();
-		// ½«ĞÂµÄËã·¨¼¯³É½øÀ´
-		float currentMousePositionX = 0.0f; // ¼ÙÉèµ±Ç°Êó±êÎ»ÖÃÎª0
-		float currentMousePositionY = 0.0f; // ¼ÙÉèµ±Ç°Êó±êÎ»ÖÃÎª0
-
-		float new_x = cross.x - recoilPos.x + Menu::recoil_X;
-		float new_y = cross.y - recoilPos.y + Menu::recoil_X;
-
-		// µ÷ÓÃ¸üĞÂÊó±êÎ»ÖÃµÄº¯Êı
-		SpringAlgo(new_x, new_y, new_x, new_y, currentMousePositionX, currentMousePositionY,
-			120.f/*µ¯»É¸Õ¶È*/,
-			150.f/*×èÄá*/,
-			5.f/*ÒıÁ¦³£Êı*/,
-			50.f/*ÖÊÁ¿*/);
-		//printf("currentMousePosition:%f  %f  \r\n", currentMousePositionX, currentMousePositionY);
-		//printf("recoilPos:%f  %f  \r\n", recoilPos.x, recoilPos.y);
-		// ·¢ËÍÊó±êÒÆ¶¯ÊÂ¼ş
-		mouse_event(MOUSEEVENTF_MOVE, static_cast<LONG>(currentMousePositionX), static_cast<LONG>(currentMousePositionY), 0, 0);
-		//ZeroMemory(&recoilPos, sizeof(recoilPos));
-	}
-
-	int Cheats::Game::getiIDEntIndex()
-	{
-		return Read<int>(pLocal.pAddr + offsets::m_iIDEntIndex);
-	}
-
-
-
-	/*void Cheats::Game::ConnectBones(int begin, int end)
-	{
-		Vector2 oldPoint;
-		for (int i = begin; i <= end; i++)
-		{
-			if (!InScreen(player.ScreenBoneArr[i].x, player.ScreenBoneArr[i].y))
-				return;
-
-			if (i != begin)
-			{
-
-				ImGui::GetBackgroundDrawList()->AddLine({ oldPoint.x,oldPoint.y }, { player.ScreenBoneArr[i].x,player.ScreenBoneArr[i].y }, ImColor(255, 255, 255));
-			}
-			oldPoint = { player.ScreenBoneArr[i].x,player.ScreenBoneArr[i].y };
-		}
-	}*/
-
-	bool Cheats::Game::InScreen(float x, float y)
-	{
-		auto& width = Visual::external.gamewindow.size.x;
-		auto& high = Visual::external.gamewindow.size.y;
-		if (x > width || y > high || x < 0 || y < 0)
+			initError = "OpenProcess failed";
 			return false;
+		}
 
+		client = BindModule(Visual::external.gamewindow.pid, L"client.dll");
+		if (!client)
+		{
+			initError = "client.dll not found";
+			CloseHandle(gamehandle);
+			gamehandle = nullptr;
+			return false;
+		}
+
+		std::string error;
+		if (!LoadOffsetsFromDir("Offsets", offsets, error))
+		{
+			initError = error;
+			CloseHandle(gamehandle);
+			gamehandle = nullptr;
+			return false;
+		}
+
+		initOk = true;
+		running = true;
+		StartThreads();
 		return true;
 	}
 
-	Vector Cheats::Game::GetCross()
+	// æ¯å¸§æ‰§è¡Œï¼šç¡®ä¿åˆå§‹åŒ–ã€æ›´æ–°çŠ¶æ€å¹¶æ¸²æŸ“è¾“å‡ºã€‚
+	void Game::CheatTick()
 	{
-		return { Visual::external.gamewindow.size.x / 2,Visual::external.gamewindow.size.y / 2 };
+		if (!CheatInit())
+		{
+			if (HasInitError())
+			{
+				ImGui::GetBackgroundDrawList()->AddText({ 20, 20 }, ImColor(255, 0, 0), initError.c_str());
+			}
+			return;
+		}
+
+		UpdateSettingsSnapshot();
+		UpdateThreadEnableFlags();
+
+		SettingsSnapshot settings = SnapshotSettings();
+		RawState raw{};
+		EspState esp{};
+		AimState aim{};
+
+		{
+			std::shared_lock lock(shared.rawMutex);
+			raw = shared.raw;
+		}
+		{
+			std::shared_lock lock(shared.espMutex);
+			esp = shared.esp;
+		}
+		{
+			std::shared_lock lock(shared.aimMutex);
+			aim = shared.aim;
+		}
+
+		RenderEsp(esp, settings);
+		RenderAim(aim);
+		RenderCrosshairInfo(raw, settings);
 	}
+
+	// å…³é—­æ¨¡å—ï¼šåœæ­¢çº¿ç¨‹å¹¶é‡Šæ”¾ç³»ç»Ÿå¥æŸ„ã€‚
+	void Game::Shutdown()
+	{
+		StopThreads();
+		if (gamehandle)
+		{
+			CloseHandle(gamehandle);
+			gamehandle = nullptr;
+		}
+	}
+
+	// æ˜¯å¦å­˜åœ¨åˆå§‹åŒ–å¤±è´¥çŠ¶æ€ã€‚
+	bool Game::HasInitError() const
+	{
+		return initAttempted && !initOk;
+	}
+
+	// è·å–åˆå§‹åŒ–é”™è¯¯æ–‡æœ¬ã€‚
+	const std::string& Game::GetInitError() const
+	{
+		return initError;
+	}
+
+	// å¯åŠ¨è¯»å–/ESP/è‡ªç„ä¸‰ä¸ªå·¥ä½œçº¿ç¨‹ã€‚
+	void Game::StartThreads()
+	{
+		readThread = std::thread(&Game::ReadWorker, this);
+		espThread = std::thread(&Game::EspWorker, this);
+		aimThread = std::thread(&Game::AimWorker, this);
+	}
+
+	// é€šçŸ¥å¹¶ç­‰å¾…æ‰€æœ‰å·¥ä½œçº¿ç¨‹é€€å‡ºã€‚
+	void Game::StopThreads()
+	{
+		if (!running.exchange(false))
+			return;
+
+		readCv.notify_all();
+		espCv.notify_all();
+		aimCv.notify_all();
+
+		if (readThread.joinable())
+			readThread.join();
+		if (espThread.joinable())
+			espThread.join();
+		if (aimThread.joinable())
+			aimThread.join();
+	}
+
+	// ä»èœå•å˜é‡æŠ“å–å¿«ç…§ï¼Œå‡å°‘å¤šçº¿ç¨‹ç›´æ¥è®¿é—®å…¨å±€èœå•çŠ¶æ€ã€‚
+	void Game::UpdateSettingsSnapshot()
+	{
+		SettingsSnapshot snapshot{};
+		snapshot.displayToggle = Menu::DisplayToggle;
+		snapshot.utilTeamCheck = Menu::utilåˆ¤æ–­é˜µè¥;
+		snapshot.utilVisibleCheck = Menu::utilå¯è§†æ£€æŸ¥;
+		snapshot.utilDraw = Menu::utilç»˜åˆ¶æ€»å¼€å…³;
+		snapshot.visBox2D = Menu::visæ–¹æ¡†é€è§†;
+		snapshot.visBox3D = Menu::vis3DBoxé€è§†;
+		snapshot.visBones = Menu::visç»˜åˆ¶éª¨éª¼;
+		snapshot.visHealth = Menu::visç»˜åˆ¶è¡€æ¡;
+		snapshot.visDistance = Menu::visç»˜åˆ¶è·ç¦»;
+		snapshot.visCross = Menu::visç»˜åˆ¶å‡†å¿ƒ;
+		snapshot.aimDrawFov = Menu::aimç»˜åˆ¶FOV;
+		snapshot.aimEnabled = Menu::aimè‡ªç„;
+		snapshot.aimRecoil = Menu::aimååº§è¡¥å¿;
+		snapshot.aimTrigger = Menu::aimæ‰³æœº;
+		snapshot.aimbotFOV = Menu::aimbotFOV;
+		snapshot.aimbotDis = Menu::aimbotDis;
+		snapshot.aimLocation = Menu::AimLocation;
+		snapshot.recoilX = Menu::recoil_X;
+		snapshot.recoilY = Menu::recoil_Y;
+		snapshot.aimKey = Menu::aimKey;
+		snapshot.triggerKey = Menu::triggerKey;
+		snapshot.mass = Menu::MASS;
+		snapshot.spring = Menu::SPRING_CONSTANT;
+		snapshot.damping = Menu::DAMPING_CONSTANT;
+		snapshot.gravity = Menu::GRAVITY_CONSTANT;
+		snapshot.screen = { Visual::external.gamewindow.size.x, Visual::external.gamewindow.size.y };
+
+		std::unique_lock lock(shared.settingsMutex);
+		shared.settings = snapshot;
+	}
+
+	// çº¿ç¨‹å®‰å…¨è¯»å–é…ç½®å¿«ç…§ã€‚
+	SettingsSnapshot Game::SnapshotSettings() const
+	{
+		std::shared_lock lock(shared.settingsMutex);
+		return shared.settings;
+	}
+
+	// æŒ‰å½“å‰åŠŸèƒ½å¼€å…³åŠ¨æ€å†³å®šå„çº¿ç¨‹æ˜¯å¦éœ€è¦å·¥ä½œã€‚
+	void Game::UpdateThreadEnableFlags()
+	{
+		const SettingsSnapshot settings = SnapshotSettings();
+
+		const bool anyEspDraw = settings.utilDraw &&
+			(settings.visBox2D || settings.visBox3D || settings.visBones || settings.visHealth || settings.visDistance);
+		const bool anyEspAux = settings.visCross || (settings.utilDraw && settings.aimDrawFov);
+		const bool espNeeded = anyEspDraw || anyEspAux || settings.aimEnabled;
+		const bool aimNeeded = settings.aimEnabled || settings.aimTrigger || settings.aimRecoil;
+		const bool readNeeded = anyEspDraw || aimNeeded;
+
+		if (readEnabled.exchange(readNeeded) != readNeeded)
+			readCv.notify_all();
+		if (espEnabled.exchange(espNeeded) != espNeeded)
+			espCv.notify_all();
+		if (aimEnabled.exchange(aimNeeded) != aimNeeded)
+			aimCv.notify_all();
+	}
+
+	// é€šè¿‡ToolHelpéå†æ¨¡å—ï¼Œè¿”å›æŒ‡å®šæ¨¡å—åŸºå€ã€‚
+	uintptr_t Game::BindModule(DWORD pid, std::wstring_view name)
+	{
+		HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+		if (snapshot == INVALID_HANDLE_VALUE)
+			return 0;
+
+		MODULEENTRY32W mod{};
+		mod.dwSize = sizeof(mod);
+		for (BOOL ok = Module32FirstW(snapshot, &mod); ok; ok = Module32NextW(snapshot, &mod))
+		{
+			if (name == std::wstring_view{ mod.szModule })
+			{
+				CloseHandle(snapshot);
+				return reinterpret_cast<uintptr_t>(mod.modBaseAddr);
+			}
+		}
+
+		CloseHandle(snapshot);
+		return 0;
+	}
+
+	// è¯»å–çº¿ç¨‹ï¼šä»ç›®æ ‡è¿›ç¨‹é‡‡æ ·ç©å®¶å®ä½“ã€éª¨éª¼ä¸æˆ˜æ–—çŠ¶æ€ã€‚
+	void Game::ReadWorker()
+	{
+		const int* boneIds = reinterpret_cast<const int*>(&boneindex);
+
+		while (running.load())
+		{
+			WaitForEnable(readEnabled, readCv, readMutex, running);
+			if (!running.load())
+				break;
+
+			// Educational note: reading another process memory should only be used for learning.
+			SettingsSnapshot settings = SnapshotSettings();
+
+			RawState newRaw{};
+			newRaw.entityList = Read<uintptr_t>(client + offsets.dwEntityList);
+			if (!newRaw.entityList)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				continue;
+			}
+
+			newRaw.matrix = Read<view_matrix_t>(client + offsets.dwViewMatrix);
+			newRaw.hasMatrix = newRaw.matrix[0][0] != 0.0f;
+
+			std::uintptr_t localAddr = Read<uintptr_t>(client + offsets.dwLocalPlayerPawn);
+			if (!localAddr)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				continue;
+			}
+
+			newRaw.local.valid = true;
+			newRaw.local.pAddr = localAddr;
+			newRaw.local.origin = Read<Vector>(localAddr + offsets.m_vOldOrigin);
+			newRaw.local.team = Read<int>(localAddr + offsets.m_iTeamNum);
+
+			newRaw.crosshairEnt = Read<int>(localAddr + offsets.m_iIDEntIndex);
+			newRaw.shotsFired = Read<int>(localAddr + offsets.m_iShotsFired);
+			newRaw.aimPunch = Read<Vector>(localAddr + offsets.m_aimPunchAngle);
+
+			const bool needBones = settings.aimEnabled || (settings.utilDraw && settings.visBones);
+			const bool needYaw = settings.utilDraw && settings.visBox3D;
+
+			for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
+			{
+				RawPlayer player{};
+
+				std::uintptr_t listEntry1 = Read<uintptr_t>(newRaw.entityList + (8ull * (index & 0x7FFF) >> 9) + 16);
+				if (!listEntry1)
+					continue;
+
+				std::uintptr_t playerController = Read<uintptr_t>(listEntry1 + 120ull * (index & 0x1FF));
+				if (!playerController)
+					continue;
+
+				uint32_t playerPawn = Read<uint32_t>(playerController + offsets.m_hPlayerPawn);
+				if (!playerPawn)
+					continue;
+
+				std::uintptr_t listEntry2 = Read<uintptr_t>(newRaw.entityList + 0x8ull * ((playerPawn & 0x7FFF) >> 9) + 16);
+				if (!listEntry2)
+					continue;
+
+				std::uintptr_t pawnPtr = Read<uintptr_t>(listEntry2 + 120ull * (playerPawn & 0x1FF));
+				if (!pawnPtr)
+					continue;
+
+				if (pawnPtr == localAddr)
+					continue;
+
+			player.pAddr = pawnPtr;
+			player.team = Read<int>(player.pAddr + offsets.m_iTeamNum);
+			if (settings.utilTeamCheck && player.team == newRaw.local.team)
+				continue;
+			player.lifeState = Read<int>(player.pAddr + offsets.m_lifeState);
+				if (player.lifeState != 256)
+					continue;
+
+				if (settings.utilVisibleCheck)
+					player.spotted = Read<bool>(player.pAddr + offsets.m_entitySpottedState + 0x08);
+				else
+					player.spotted = true;
+
+				player.health = Read<int>(player.pAddr + offsets.m_iHealth);
+				player.origin = Read<Vector>(player.pAddr + offsets.m_vOldOrigin);
+
+				if (needYaw)
+				{
+					Vector ang = Read<Vector>(player.pAddr + offsets.m_angEyeAngles);
+					player.pitch = ang.x;
+					player.yaw = ang.y;
+				}
+
+				player.dis2LP = newRaw.local.origin.CalcDis2Point3D(player.origin);
+
+				if (needBones)
+				{
+					player.sceneNode = Read<uintptr_t>(player.pAddr + offsets.m_pGameSceneNode);
+					if (player.sceneNode)
+					{
+						player.boneArr = Read<uintptr_t>(player.sceneNode + offsets.m_modelState + 0x80);
+						if (player.boneArr)
+						{
+							player.head = Read<Vector>(player.boneArr + static_cast<std::uintptr_t>(boneindex.head) * 32);
+							for (size_t i = 0; i < kBoneCount; ++i)
+							{
+								const int boneId = boneIds[i];
+								player.worldBones[i] = Read<Vector>(player.boneArr + static_cast<std::uintptr_t>(boneId) * 32);
+							}
+						}
+					}
+				}
+
+				player.valid = true;
+				newRaw.players[index] = player;
+			}
+
+			newRaw.hasLocal = true;
+
+			{
+				std::unique_lock lock(shared.rawMutex);
+				shared.raw = newRaw;
+			}
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		}
+	}
+
+	// ESPçº¿ç¨‹ï¼šå°†åŸå§‹æ•°æ®è½¬æ¢ä¸ºå±å¹•ç»˜åˆ¶æ•°æ®ã€‚
+	void Game::EspWorker()
+	{
+		while (running.load())
+		{
+			WaitForEnable(espEnabled, espCv, espMutex, running);
+			if (!running.load())
+				break;
+
+			SettingsSnapshot settings = SnapshotSettings();
+
+			RawState raw{};
+			{
+				std::shared_lock lock(shared.rawMutex);
+				raw = shared.raw;
+			}
+
+			EspState newEsp{};
+			newEsp.screen = settings.screen;
+			if (settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
+				continue;
+			}
+
+			newEsp.cross = GetCross(settings.screen);
+			newEsp.fovRadius = settings.aimbotFOV;
+			newEsp.showFov = settings.utilDraw && settings.aimDrawFov;
+			newEsp.showCross = settings.visCross;
+
+			const bool needBoxes = settings.utilDraw && (settings.visBox2D || settings.visBox3D || settings.visHealth || settings.visDistance);
+			const bool needBones = settings.aimEnabled || (settings.utilDraw && settings.visBones);
+			const bool need3d = settings.utilDraw && settings.visBox3D;
+
+			if (raw.hasMatrix)
+			{
+				for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
+				{
+					const RawPlayer& rp = raw.players[index];
+					if (!rp.valid)
+						continue;
+
+					EspPlayer ep{};
+					ep.valid = true;
+					ep.origin = rp.origin;
+					ep.health = rp.health;
+					ep.team = rp.team;
+					ep.spotted = rp.spotted;
+					ep.dis2LP = rp.dis2LP;
+					ep.yaw = rp.yaw;
+
+					if (needBoxes || need3d)
+					{
+						Vector originScreen{};
+						Vector headScreen{};
+						Vector headWorld = rp.origin;
+						headWorld.z += 68.0f;
+						if (WorldToScreen(rp.origin, raw.matrix, settings.screen, originScreen) &&
+							WorldToScreen(headWorld, raw.matrix, settings.screen, headScreen))
+						{
+							ep.originScreen = originScreen;
+							ep.headScreen = headScreen;
+							ep.espWidth = (originScreen.y - headScreen.y) / 4.0f;
+							ep.esp1 = { headScreen.x - ep.espWidth, headScreen.y, 0.0f };
+							ep.esp2 = { originScreen.x + ep.espWidth, originScreen.y, 0.0f };
+							ep.hasBox2d = true;
+						}
+					}
+
+					if (needBones)
+					{
+						for (size_t i = 0; i < kBoneCount; ++i)
+						{
+							const Vector& worldBone = rp.worldBones[i];
+							if (std::abs(worldBone.x) <= 10.0f || std::abs(worldBone.y) <= 10.0f || std::abs(worldBone.z) <= 10.0f)
+								continue;
+
+							Vector screenBone{};
+							if (WorldToScreen(worldBone, raw.matrix, settings.screen, screenBone))
+								ep.screenBones[i] = screenBone;
+						}
+					}
+
+					if (need3d)
+					{
+						bool allOk = true;
+						const float headZ = rp.origin.z + 68.0f;
+						for (int i = 0; i < 4; ++i)
+						{
+							const int offset = 45 + i * 90;
+							Vector bottomWorld{};
+							Vector topWorld{};
+							const float radians = (rp.yaw + offset) * (kPi / 180.0f);
+							bottomWorld.x = rp.origin.x + std::cos(radians) * 25.0f;
+							bottomWorld.y = rp.origin.y + std::sin(radians) * 25.0f;
+							bottomWorld.z = rp.origin.z;
+							topWorld = bottomWorld;
+							topWorld.z = headZ;
+
+							Vector bottomScreen{};
+							Vector topScreen{};
+							if (!WorldToScreen(bottomWorld, raw.matrix, settings.screen, bottomScreen) ||
+								!WorldToScreen(topWorld, raw.matrix, settings.screen, topScreen))
+							{
+								allOk = false;
+								break;
+							}
+
+							ep.box3dBottom[i] = bottomScreen;
+							ep.box3dTop[i] = topScreen;
+						}
+						ep.has3dBox = allOk;
+					}
+
+					newEsp.players[index] = ep;
+				}
+			}
+
+			newEsp.hasData = true;
+			{
+				std::unique_lock lock(shared.espMutex);
+				shared.esp = newEsp;
+			}
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		}
+	}
+
+	// è‡ªç„çº¿ç¨‹ï¼šæ‰§è¡Œç›®æ ‡ç­›é€‰ã€å¹³æ»‘ç§»åŠ¨ä¸æ‰³æœºé€»è¾‘ã€‚
+	void Game::AimWorker()
+	{
+		while (running.load())
+		{
+			WaitForEnable(aimEnabled, aimCv, aimMutex, running);
+			if (!running.load())
+				break;
+
+			SettingsSnapshot settings = SnapshotSettings();
+			if (settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(5));
+				continue;
+			}
+
+			RawState raw{};
+			EspState esp{};
+
+			{
+				std::shared_lock lock(shared.rawMutex);
+				raw = shared.raw;
+			}
+			{
+				std::shared_lock lock(shared.espMutex);
+				esp = shared.esp;
+			}
+
+			AimState newAim{};
+			const Vector cross = GetCross(settings.screen);
+
+			if (raw.shotsFired > 1)
+			{
+				const float alpha = 0.8f;
+				newAim.recoilPos = cross;
+				newAim.recoilPos.x = newAim.recoilPos.x * (1.0f - alpha) + (cross.x - raw.aimPunch.y * 10.0f) * alpha;
+				newAim.recoilPos.y = newAim.recoilPos.y * (1.0f - alpha) + (cross.y + raw.aimPunch.x * 10.0f) * alpha;
+				newAim.hasRecoil = true;
+			}
+
+			if (!settings.displayToggle)
+			{
+				int bestIndex = -1;
+				float bestDist = std::numeric_limits<float>::max();
+
+				if (settings.aimEnabled)
+				{
+					for (int i = 0; i < static_cast<int>(kMaxPlayers); ++i)
+					{
+						const RawPlayer& rp = raw.players[i];
+						const EspPlayer& ep = esp.players[i];
+						if (!rp.valid || !ep.valid)
+							continue;
+
+						if (settings.utilTeamCheck && rp.team == raw.local.team)
+							continue;
+						if (settings.utilVisibleCheck && !rp.spotted)
+							continue;
+						if (rp.dis2LP > settings.aimbotDis * 75.0f)
+							continue;
+
+						const Vector target = ep.screenBones[settings.aimLocation];
+						if (target.z <= 0.0f || !InScreen(settings.screen, target.x, target.y))
+							continue;
+
+						float dist = target.CalculateDistanceToPoint2D(cross);
+						if (dist < settings.aimbotFOV && dist < bestDist)
+						{
+							bestDist = dist;
+							bestIndex = i;
+						}
+					}
+				}
+
+				if (settings.aimEnabled && (GetAsyncKeyState(settings.aimKey) & 0x8000) && bestIndex != -1)
+				{
+					const EspPlayer& target = esp.players[bestIndex];
+					const Vector targetPos = target.screenBones[settings.aimLocation];
+					float moveX = 0.0f;
+					float moveY = 0.0f;
+
+					if (settings.aimRecoil && newAim.hasRecoil)
+					{
+						moveX = targetPos.x - newAim.recoilPos.x + static_cast<float>(settings.recoilX);
+						moveY = targetPos.y - newAim.recoilPos.y + static_cast<float>(settings.recoilY);
+					}
+					else
+					{
+						moveX = targetPos.x - cross.x;
+						moveY = targetPos.y - cross.y;
+					}
+
+					float currentMouseX = 0.0f;
+					float currentMouseY = 0.0f;
+					SpringAlgo(moveX, moveY, moveX, moveY, currentMouseX, currentMouseY,
+						settings.spring, settings.damping, settings.gravity, settings.mass);
+					mouse_event(MOUSEEVENTF_MOVE, static_cast<LONG>(currentMouseX), static_cast<LONG>(currentMouseY), 0, 0);
+				}
+
+				if (settings.aimTrigger && GetAsyncKeyState(settings.triggerKey))
+				{
+					if (raw.crosshairEnt > 0 && raw.crosshairEnt < static_cast<int>(kMaxPlayers))
+					{
+						const RawPlayer& target = raw.players[raw.crosshairEnt];
+						if (target.valid && (!settings.utilTeamCheck || target.team != raw.local.team))
+							mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+						else
+							mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+					}
+					else
+					{
+						mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+					}
+				}
+				else
+				{
+					mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+				}
+			}
+
+			{
+				std::unique_lock lock(shared.aimMutex);
+				shared.aim = newAim;
+			}
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
+	}
+
+	// æ¸²æŸ“æ‰€æœ‰ESPå¯è§†åŒ–å…ƒç´ ã€‚
+	void Game::RenderEsp(const EspState& esp, const SettingsSnapshot& settings) const
+	{
+		if (esp.screen.x <= 0.0f || esp.screen.y <= 0.0f)
+			return;
+
+		if (settings.utilDraw && settings.aimDrawFov)
+			DrawFov(esp.cross, esp.fovRadius);
+
+		if (settings.visCross)
+			DrawCross(esp.cross);
+
+		if (!settings.utilDraw)
+			return;
+
+		for (const auto& player : esp.players)
+		{
+			if (!player.valid)
+				continue;
+
+			if (settings.visBones)
+				DrawBones(player, esp.screen);
+			if (settings.visBox2D)
+				DrawEsp2D(player, esp.screen);
+			if (settings.visBox3D)
+				Draw3DBox(player);
+			if (settings.visHealth)
+				DrawHealth(player);
+			if (settings.visDistance)
+				DrawDistance(player, esp.screen);
+		}
+	}
+
+	// æ¸²æŸ“è‡ªç„è¾…åŠ©UIï¼ˆå¦‚åååŠ›ç‚¹ï¼‰ã€‚
+	void Game::RenderAim(const AimState& aim) const
+	{
+		if (!aim.hasRecoil)
+			return;
+
+		ImGui::GetBackgroundDrawList()->AddCircleFilled(
+			{ aim.recoilPos.x - 2.0f, aim.recoilPos.y - 2.0f },
+			6.0f,
+			ImColor(255, 255, 0));
+	}
+
+	// æ¸²æŸ“å‡†æ˜Ÿå‘½ä¸­å®ä½“ä¿¡æ¯ï¼ˆè°ƒè¯•/å­¦ä¹ ç”¨ï¼‰ã€‚
+	void Game::RenderCrosshairInfo(const RawState& raw, const SettingsSnapshot& settings) const
+	{
+		if (raw.crosshairEnt > 0)
+		{
+			char buff[128];
+			sprintf_s(buff, "crosshair id:%d", raw.crosshairEnt);
+			ImGui::GetBackgroundDrawList()->AddText(
+				{ settings.screen.x * 0.5f - 120.0f, 150.0f },
+				ImColor(255, 0, 0),
+				buff);
+			ImGui::GetBackgroundDrawList()->AddCircleFilled(
+				{ settings.screen.x * 0.5f, 200.0f },
+				10.0f,
+				ImColor(255, 0, 0));
+		}
+	}
+}
 

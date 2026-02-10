@@ -48,7 +48,13 @@
     <ClInclude Include="Visuals\Menu.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="Cheats\Offsets.h">
+    <ClInclude Include="Cheats\GameState.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\OffsetsData.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\OffsetsLoader.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>
@@ -90,6 +96,9 @@
       <Filter>头文件</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\AlgorAim.h">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\OffsetsLoader.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

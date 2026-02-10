@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 //#include<numbers>
 #include<cmath>
 #include "../Visuals/External.h"
@@ -6,6 +6,10 @@
 struct view_matrix_t
 {
 	float* operator[](int index)
+	{
+		return matrix[index];
+	}
+	const float* operator[](int index) const
 	{
 		return matrix[index];
 	}
@@ -22,7 +26,7 @@ public:
 		const float z = 0.f) noexcept :
 		x(x), y(y), z(z) { }
 
-	//operator ÖØÔØ
+	//operator é‡è½½
 
 	constexpr const Vector& operator-(const Vector& other) const noexcept
 	{
@@ -44,29 +48,29 @@ public:
 		return Vector{ x * factor, y * factor, z * factor };
 	}
 
-	//¼ÆËãÈıÎ¬¿Õ¼äÄÚµã(x,y,z)¾àÀë×ø±êÖáÔ­µãµÄ¾àÀë
-	float CalcDis2Orign3D()
+	//è®¡ç®—ä¸‰ç»´ç©ºé—´å†…ç‚¹(x,y,z)è·ç¦»åæ ‡è½´åŸç‚¹çš„è·ç¦»
+	float CalcDis2Orign3D() const
 	{
 		return sqrtf(powf(x, 2) + powf(y, 2) + powf(z, 2));
 	}
-	//¼ÆËãÈıÎ¬¿Õ¼äÄÚµã(x,y,z)¾àÀëÁíÒ»¸öµãµÄ¾àÀë
-	float CalcDis2Point3D(const Vector& pos)
+	//è®¡ç®—ä¸‰ç»´ç©ºé—´å†…ç‚¹(x,y,z)è·ç¦»å¦ä¸€ä¸ªç‚¹çš„è·ç¦»
+	float CalcDis2Point3D(const Vector& pos) const
 	{
 		return sqrtf(powf(pos.x - x, 2) + powf(pos.y - y, 2) + powf(pos.z - z, 2));
 	}
-	//¼ÆËã¶şÎ¬¿Õ¼äÄÚµã(x,y)¾àÀë×ø±êÖáÔ­µãµÄ¾àÀë
-	float CalculateDistance2D()
+	//è®¡ç®—äºŒç»´ç©ºé—´å†…ç‚¹(x,y)è·ç¦»åæ ‡è½´åŸç‚¹çš„è·ç¦»
+	float CalculateDistance2D() const
 	{
 		return sqrtf(powf(x, 2) + powf(y, 2));
 	}
-	//¼ÆËã¶şÎ¬¿Õ¼äÄÚµã(x,y)¾àÀëÁíÒ»¸öµãµÄ¾àÀë
-	float CalculateDistanceToPoint2D(const Vector& pos)
+	//è®¡ç®—äºŒç»´ç©ºé—´å†…ç‚¹(x,y)è·ç¦»å¦ä¸€ä¸ªç‚¹çš„è·ç¦»
+	float CalculateDistanceToPoint2D(const Vector& pos) const
 	{
 		return sqrtf(powf(pos.x - x, 2) + powf(pos.y - y, 2));
 	}
 
 
-	Vector world2screen(view_matrix_t vm)
+	Vector world2screen(view_matrix_t vm) const
 	{
 		float _x = vm[0][0] * x + vm[0][1] * y + vm[0][2] * z + vm[0][3];
 		float _y = vm[1][0] * x + vm[1][1] * y + vm[1][2] * z + vm[1][3];
@@ -92,11 +96,10 @@ public:
 		return { x,y,w };
 	}
 
-	bool IsZero()
+	bool IsZero() const
 	{
 		return x == 0.0f && y == 0.0f && z == 0.0f;
 	}
 
 	float x, y, z;
 };
-

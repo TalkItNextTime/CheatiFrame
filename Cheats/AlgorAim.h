@@ -1,14 +1,15 @@
-#include <iostream>
+﻿#include <iostream>
 #include <ctime>
 #include <cmath>
 #include "../Visuals/Menu.h"
 #include <windows.h>
 
-// ���峣��
+// 定义常量
 const float PIXELS_PER_METER = 100.0f;
 
 
-// �������λ�õĺ���
+// 弹簧阻尼算法：根据目标点计算鼠标平滑位移，
+// 用于模拟更自然的准星跟随效果（学习用途）。
 inline void SpringAlgo(float mousePositionX, float mousePositionY,
 	float targetX, float targetY,
 	float& currentMousePositionX, float& currentMousePositionY,

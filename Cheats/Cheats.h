@@ -1,34 +1,25 @@
-#pragma once
+ï»¿#pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 
 #include <Windows.h>
-#include <stdio.h>
-#include <chrono> //Ê±¼ä¿â
 #include <TlHelp32.h>
-#include <vector>
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <string>
+#include <string_view>
 #include <thread>
 
-#include"../Visuals/Menu.h"
-#include"../Visuals/External.h"
-#include "../Math/Vector.h"
-#include "../Visuals/Menu.h"
-#include "Offsets.h"
-#include "AlgorAim.h"
-//#include "Bones.h"
+#include "GameState.h"
+#include "OffsetsData.h"
 
 namespace Cheats
 {
-	inline uintptr_t entityList;
-	inline uintptr_t list_entry1;
-	inline uintptr_t playerController;
-	inline uint32_t	 playerPawn;
-	inline uintptr_t list_entry2;
-	inline uintptr_t pCSPlayerPawnPtr;
-
-	//inline uintptr_t aimTargetAddr;
-
-
-	struct BoneIndex //¹Ç÷ÀË÷Òı
+	struct BoneIndex
 	{
 		int head = 6, spine = 4, hip = 0;
 		int hand_l = 11, lowerarm_l = 9, upperarm_l = 8, spine2 = 4;
@@ -37,130 +28,97 @@ namespace Cheats
 		int thigh_r = 26, calf_r = 27;
 	};
 
-
-
 	class Game
 	{
 	public:
-		HANDLE gamehandle;   //ÓÎÏ·½ø³Ì¾ä±ú
-		ptrdiff_t client; //client.dllµØÖ·
-		view_matrix_t matrix;
-		BoneIndex boneindex;
-		float tem_distance_to_crosshair = 99999.f;//ÈËÎïÓë×¼ĞÄÖ®¼äµÄ¾àÀë
-		float distance_to_crosshair = 0.f;
-		Vector recoilPos;
-		Vector aim_punch;
-		int crosshair_ent=-1;
+		// åˆå§‹åŒ–ä½œå¼Šæ¨¡å—ï¼šæ‰“å¼€è¿›ç¨‹ã€ç»‘å®šæ¨¡å—ã€åŠ è½½åç§»å¹¶å¯åŠ¨å·¥ä½œçº¿ç¨‹ã€‚
+		bool CheatInit();
+		// æ¯å¸§ä¸»å…¥å£ï¼šæ›´æ–°é…ç½®å¿«ç…§å¹¶æ‰§è¡Œç»˜åˆ¶å±‚é€»è¾‘ã€‚
+		void CheatTick();
+		// å…³é—­å¹¶æ¸…ç†èµ„æºï¼šåœæ­¢çº¿ç¨‹å¹¶é‡Šæ”¾è¿›ç¨‹å¥æŸ„ã€‚
+		void Shutdown();
 
-		bool CheatInit(); //³õÊ¼»¯
-		void CheatLoop(); //±éÀú
+		// è¿”å›æ˜¯å¦å‡ºç°åˆå§‹åŒ–å¤±è´¥ï¼ˆç”¨äºUIæç¤ºé”™è¯¯ä¿¡æ¯ï¼‰ã€‚
+		bool HasInitError() const;
+		// è·å–åˆå§‹åŒ–å¤±è´¥çš„é”™è¯¯å­—ç¬¦ä¸²ã€‚
+		const std::string& GetInitError() const;
 
-		struct Player   //ÈËÎïĞÅÏ¢½á¹¹Ìå
-		{
-		public:
-			
-			uintptr_t pAddr; //ÈËÎï½á¹¹Ìå±£´æµØÖ·
-			uintptr_t sceneNode;
-			uintptr_t boneArr;
-
-			Vector origin;
-			Vector head;
-
-			int lifeState; //256´æ»î
-			int team;  //¾¯3 ·Ë2
-			bool spotted;
-			int health;
-			float pitch;
-			float yaw;
-
-			float espWidth;
-			Vector ESP1;
-			Vector ESP2;
-
-			float dis2LP;//Óë±¾µØÍæ¼ÒµÄ¾àÀë
-			float dis2Cross; //ÈËÎïÓë×¼ĞÄµÄ¾àÀë
-
-			Vector WorldBoneArr[sizeof(boneindex) / sizeof(int)];							 //ÈËÎïÊÀ½ç¹Ç÷ÀµãÊı×é
-			Vector ScreenBoneArr[sizeof(boneindex) / sizeof(int)];							 //ÈËÎïÆÁÄ»¹Ç÷ÀµãÊı×é
-			//Vector ScreenBone1Arr[sizeof(boneConnections) / sizeof(boneConnections[0])]; //ÈËÎïÆÁÄ»¹Ç÷ÀµãÊı×é
-			//Vector ScreenBone2Arr[sizeof(boneConnections) / sizeof(boneConnections[0])]; //ÈËÎïÆÁÄ»¹Ç÷ÀµãÊı×é
-
-		};
-		
-		Player pLocal;	//±¾µØÍæ¼ÒĞÅÏ¢
-		Player player;	//µ±Ç°±éÀúµÄÍæ¼ÒĞÅÏ¢
-
-		Player temp_target_info;			//×ÔÃéÄ¿±êµÄĞÅÏ¢
-		Player target_info;
-
-		
-
-	
-		
 	private:
+		// åˆ›å»ºå¹¶å¯åŠ¨è¯»å–ã€ESPã€è‡ªç„ä¸‰ä¸ªå·¥ä½œçº¿ç¨‹ã€‚
+		void StartThreads();
+		// é€šçŸ¥å¹¶ç­‰å¾…æ‰€æœ‰å·¥ä½œçº¿ç¨‹å®‰å…¨é€€å‡ºã€‚
+		void StopThreads();
 
-	uintptr_t bind_modules(DWORD pid, std::string_view mname);
-	bool UpdateLocalInfo();
-	bool UpdatePlayerInfo(int index);
-	bool UpdateMatrix();										//¸üĞÂ¾ØÕó
-	bool UpdateBones();											//¸üĞÂ¹Ç÷ÀĞÅÏ¢
+		// å†…å­˜è¯»å–çº¿ç¨‹ï¼šå‘¨æœŸæ€§é‡‡é›†ç©å®¶ã€éª¨éª¼ã€çŸ©é˜µç­‰åŸå§‹æ•°æ®ã€‚
+		void ReadWorker();
+		// ESPçº¿ç¨‹ï¼šå°†ä¸–ç•Œåæ ‡è½¬æ¢ä¸ºå±å¹•åæ ‡å¹¶æ„å»ºå¯ç»˜åˆ¶æ•°æ®ã€‚
+		void EspWorker();
+		// è‡ªç„çº¿ç¨‹ï¼šé€‰æ‹©ç›®æ ‡å¹¶æ‰§è¡Œé¼ æ ‡ç§»åŠ¨/æ‰³æœºé€»è¾‘ã€‚
+		void AimWorker();
 
-	bool Calc2DBoxPos();										//¼ÆËã2D·½¿òÆÁÄ»Î»ÖÃ
-	void DrawESP2D();											//»æÖÆ2D·½¿ò
-	void DrawHealth();											//»æÖÆÑªÌõ
-	void Draw3DBox();											//»æÖÆ3D·½¿ò
-	void DrawDistance();										//»æÖÆ¾àÀë
-	void DrawFov();												//»æÖÆ×ÔÃé·¶Î§
-	void DrawBones();											//»æÖÆ¹Ç÷À
-	void ConnectBones(int begin,int end);						//»æÖÆ¹Ç÷ÀÁ¬Ïß
-	void DrawCross();											//»æÖÆ×¼ĞÄ
+		// ä»èœå•è¯»å–å½“å‰é…ç½®å¹¶å†™å…¥çº¿ç¨‹å…±äº«å¿«ç…§ã€‚
+		void UpdateSettingsSnapshot();
+		// æŒ‰å½“å‰é…ç½®å†³å®šå„çº¿ç¨‹æ˜¯å¦éœ€è¦è¿è¡Œå¹¶å”¤é†’å®ƒä»¬ã€‚
+		void UpdateThreadEnableFlags();
+		// çº¿ç¨‹å®‰å…¨åœ°è¯»å–é…ç½®å¿«ç…§å‰¯æœ¬ã€‚
+		SettingsSnapshot SnapshotSettings() const;
 
-	//×ÔÃé
-	void EnterAimQueue();										//½øÈë×ÔÃé¶ÓÁĞ
-	void GetTargetInfo();										//»ñÈ¡Ä¿±êĞÅÏ¢
-	void Aimbot();												//Ğ´ÄÚ´æ×ÔÃé
-	void TriggerBot();											//°â»ú
-	int getShots();												//»ñÈ¡¿ª»ğ×´Ì¬
-	Vector getAimPunch();										//»ñÈ¡ºó×ù
-	void recoilCompensation();									//ºó×ù²¹³¥¼ÆËã
-	void recoilMove(float x,float y);							//ºó×ù²¹³¥Êó±êÒÆ¶¯
-	int getiIDEntIndex();										//»ñÈ¡×¼ĞÄÃé×¼ĞÅÏ¢
+		// æ ¹æ®ESPçŠ¶æ€ä¸è®¾ç½®ç»˜åˆ¶æ‰€æœ‰å¯è§†åŒ–å…ƒç´ ã€‚
+		void RenderEsp(const EspState& esp, const SettingsSnapshot& settings) const;
+		// ç»˜åˆ¶åååŠ›è¡¥å¿ç‚¹ç­‰è‡ªç„è¾…åŠ©ä¿¡æ¯ã€‚
+		void RenderAim(const AimState& aim) const;
+		// ç»˜åˆ¶å‡†æ˜Ÿå‘½ä¸­å®ä½“ç­‰è°ƒè¯•ä¿¡æ¯ã€‚
+		void RenderCrosshairInfo(const RawState& raw, const SettingsSnapshot& settings) const;
 
-	//void algorAim(Vector targetPos, float& currentMousePositionX, float& currentMousePositionY);											//Ëã·¨×ÔÃé
+		// é€šè¿‡æ¨¡å—åæŸ¥æ‰¾ç›®æ ‡è¿›ç¨‹æ¨¡å—åŸºå€ã€‚
+		uintptr_t BindModule(DWORD pid, std::wstring_view name);
 
-	bool InScreen(float x, float y);							//ÅĞ¶ÏÊÇ·ñÔÚÆÁÄ»ÄÚ
-	Vector GetCross();											//»ñÈ¡×¼ĞÄ×ø±ê
-	template <typename T>T Read(uintptr_t address);
-	template <typename T>T Write(uintptr_t address, T value);
+		template <typename T>
+		// è¯»å–ç›®æ ‡è¿›ç¨‹æŒ‡å®šåœ°å€å¹¶æŒ‰æ¨¡æ¿ç±»å‹è¿”å›ç»“æœã€‚
+		T Read(uintptr_t address)
+		{
+			T buffer{};
+			ReadProcessMemory(gamehandle, reinterpret_cast<void*>(address), &buffer, sizeof(T), nullptr);
+			return buffer;
+		}
 
+		template <typename T>
+		// å‘ç›®æ ‡è¿›ç¨‹æŒ‡å®šåœ°å€å†™å…¥æ¨¡æ¿ç±»å‹æ•°æ®ã€‚
+		void Write(uintptr_t address, const T& value)
+		{
+			WriteProcessMemory(gamehandle, reinterpret_cast<void*>(address), &value, sizeof(T), nullptr);
+		}
+
+	private:
+		HANDLE gamehandle = nullptr;
+		ptrdiff_t client = 0;
+		OffsetsData offsets{};
+		BoneIndex boneindex{};
+		SharedState shared{};
+
+		std::atomic<bool> running{ false };
+		std::atomic<bool> readEnabled{ false };
+		std::atomic<bool> espEnabled{ false };
+		std::atomic<bool> aimEnabled{ false };
+
+		std::thread readThread{};
+		std::thread espThread{};
+		std::thread aimThread{};
+
+		std::mutex readMutex{};
+		std::mutex espMutex{};
+		std::mutex aimMutex{};
+		std::condition_variable readCv{};
+		std::condition_variable espCv{};
+		std::condition_variable aimCv{};
+
+		bool initAttempted = false;
+		bool initOk = false;
+		std::string initError{};
 	};
 
-	inline Game gameName ;
+	inline Game gameName;
 
+	// å…¨å±€ä½œå¼Šä¸»å‡½æ•°ï¼šå¤„ç†çƒ­é”®ã€èœå•å’Œæ¯å¸§æ‰§è¡Œã€‚
 	void CheatMain();
-
-	template <typename T>
-	T Game::Read(uintptr_t address)
-	{
-		T buffer{ };
-		ReadProcessMemory(this->gamehandle, (void*)address, &buffer, sizeof(T), 0);
-		return buffer;
-	}
-
-	template <typename T>
-	T Game::Write(uintptr_t address, T value)
-	{
-		WriteProcessMemory(this->gamehandle, (void*)address, &value, sizeof(T), NULL);
-		return value;
-	}
-
-
 }
-
-
-
-
-
-
-
-
