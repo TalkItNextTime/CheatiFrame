@@ -102,6 +102,14 @@ namespace Cheats
 		bool ReloadGrenadeMap(const std::string& mapName, std::string& error);
 		// 如地图变化则自动重载点位。
 		void EnsureGrenadeMapLoaded(const std::string& mapName);
+		// 响应菜单中的配置系统请求（刷新列表/保存/加载）。
+		void HandleConfigRequests(const SettingsSnapshot& settings);
+		// 枚举 Configs 目录中可用配置名。
+		std::vector<std::string> ListConfigs() const;
+		// 保存当前菜单设置到命名配置文件。
+		bool SaveConfig(const std::string& name, std::string& error) const;
+		// 从命名配置文件加载并回填菜单设置。
+		bool LoadConfig(const std::string& name, std::string& error) const;
 		// 渲染投掷物辅助引导。
 		void RenderGrenadeHelper(const RawState& raw, const SettingsSnapshot& settings) const;
 		// 读取地图JSON点位文件。

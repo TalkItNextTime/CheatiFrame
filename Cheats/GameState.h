@@ -128,7 +128,15 @@ namespace Cheats
 		float helperMaxStandDrawDistance = 2000.0f;
 		float helperLooseGuideDistance = 5000.0f;
 		float helperRecordDistance = 10000.0f;
+		char helperMapName[64]{};
+		char helperNote[128]{};
 		bool helperRecordPending = false;
+		bool helperSyncGrenadeTypePending = false;
+		bool configRefreshPending = false;
+		bool configSavePending = false;
+		bool configLoadPending = false;
+		char configName[64]{};
+		int configSelectedIndex = 0;
 		ScreenSize screen{};
 	};
 

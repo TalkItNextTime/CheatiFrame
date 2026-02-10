@@ -22,6 +22,7 @@ namespace Cheats
 		std::uintptr_t m_vOldOrigin{};
 		std::uintptr_t m_entitySpottedState{};
 		std::uintptr_t m_pGameSceneNode{};
+		std::uintptr_t m_vecAbsOrigin{};
 		std::uintptr_t m_modelState{};
 		std::uintptr_t m_iShotsFired{};
 		std::uintptr_t m_aimPunchAngle{};

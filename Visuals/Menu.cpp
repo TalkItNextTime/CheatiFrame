@@ -1,6 +1,8 @@
 ﻿#include "Menu.h"
 #include "../Visuals/External.h"
 
+#include <cstring>
+
 bool isListeningForAimKey = false;
 bool isListeningForTriggerKey = false;
 
@@ -120,6 +122,12 @@ void Menu::ShowMenu()
 
 		if (ImGui::BeginTabItem(u8"投掷物辅助"))
 		{
+			if (!Menu::helper本次菜单已自动同步)
+			{
+				Menu::helper本次菜单已自动同步 = true;
+				Menu::helper请求同步手雷类型 = true;
+			}
+
 			static const char* grenadeTypes[] = { "Smoke", "Flash", "HE", "Decoy" };
 			static const char* throwTypes[] = { u8"站投", u8"跳投", u8"跑投" };
 
@@ -127,6 +135,8 @@ void Menu::ShowMenu()
 			ImGui::Checkbox(u8"按当前手雷类型筛选", &Menu::helper按武器筛选);
 			ImGui::Checkbox(u8"绘制站位", &Menu::helper绘制站位);
 			ImGui::Checkbox(u8"绘制瞄点", &Menu::helper绘制瞄点);
+			ImGui::TextWrapped(u8"说明: 手雷类型会在菜单每次重新显示后，首次打开本页时自动读取一次当前手持投掷物。"
+				u8"\n手动覆盖仅用于调试/录制：强制按你选择的手雷类型筛选或记录。关闭后恢复自动读取。");
 
 			ImGui::Separator();
 			ImGui::Checkbox(u8"手动覆盖手雷类型", &Menu::helper手动类型覆盖);
@@ -150,6 +160,52 @@ void Menu::ShowMenu()
 				Menu::helper请求刷新 = true;
 
 			ImGui::TextWrapped(u8"状态: %s", Menu::helper状态.c_str());
+
+			ImGui::EndTabItem();
+		}
+
+		if (ImGui::BeginTabItem(u8"配置"))
+		{
+			if (Menu::config列表.empty())
+			{
+				Menu::config请求刷新列表 = true;
+			}
+
+			ImGui::Text(u8"配置管理");
+			ImGui::InputText(u8"配置名", Menu::config名称, IM_ARRAYSIZE(Menu::config名称));
+
+			if (ImGui::Button(u8"刷新配置列表"))
+				Menu::config请求刷新列表 = true;
+			ImGui::SameLine();
+			if (ImGui::Button(u8"保存配置"))
+				Menu::config请求保存 = true;
+			ImGui::SameLine();
+			if (ImGui::Button(u8"加载配置"))
+				Menu::config请求加载 = true;
+
+			const char* previewName = Menu::config列表.empty()
+				? u8"(无配置)"
+				: Menu::config列表[(Menu::config选择索引 < 0 || Menu::config选择索引 >= static_cast<int>(Menu::config列表.size()))
+					? 0
+					: Menu::config选择索引].c_str();
+
+			if (ImGui::BeginCombo(u8"已保存配置", previewName))
+			{
+				for (int i = 0; i < static_cast<int>(Menu::config列表.size()); ++i)
+				{
+					const bool selected = (Menu::config选择索引 == i);
+					if (ImGui::Selectable(Menu::config列表[i].c_str(), selected))
+					{
+						Menu::config选择索引 = i;
+						strncpy_s(Menu::config名称, Menu::config列表[i].c_str(), _TRUNCATE);
+					}
+					if (selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+
+			ImGui::TextWrapped(u8"配置状态: %s", Menu::config状态.c_str());
 			ImGui::EndTabItem();
 		}
 

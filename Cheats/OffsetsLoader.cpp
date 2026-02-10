@@ -194,6 +194,7 @@ namespace Cheats
 			{ "C_BasePlayerPawn", "m_vOldOrigin", &out.m_vOldOrigin },
 			{ "C_CSPlayerPawn", "m_entitySpottedState", &out.m_entitySpottedState },
 			{ "C_BaseEntity", "m_pGameSceneNode", &out.m_pGameSceneNode },
+			{ "CGameSceneNode", "m_vecAbsOrigin", &out.m_vecAbsOrigin },
 			{ "CSkeletonInstance", "m_modelState", &out.m_modelState },
 			{ "C_CSPlayerPawn", "m_iShotsFired", &out.m_iShotsFired },
 			{ "C_CSPlayerPawn", "m_aimPunchAngle", &out.m_aimPunchAngle },

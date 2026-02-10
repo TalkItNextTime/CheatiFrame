@@ -1,4 +1,6 @@
-#include "External.h"
+ï»¿#include "External.h"
+
+#include <filesystem>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -39,7 +41,7 @@ void Visual::External::AttachWindow(std::string class_name, std::string window_n
 {
 	if (class_name.empty() && window_name.empty() || !cheat)
 	{
-		printf("AttachWindow²ÎÊı´íÎó\r\n");
+		printf("AttachWindowå‚æ•°é”™è¯¯\r\n");
 		return ;
 	}
 
@@ -50,40 +52,40 @@ void Visual::External::AttachWindow(std::string class_name, std::string window_n
 
 	if (!gamewindow.hwnd)
 	{
-		printf("ÓÎÏ·Ã»¿ªÄØ\r\n");
+		printf("æ¸¸æˆæ²¡å¼€å‘¢\r\n");
 		return ;
 	}
 
-	//2.»ñÈ¡½ø³Ìpid
+	//2.è·å–è¿›ç¨‹pid
 	if (GetWindowThreadProcessId(gamewindow.hwnd, &gamewindow.pid) == 0)
 	{
-		printf("È¡²»µ½pid\r\n");
+		printf("å–ä¸åˆ°pid\r\n");
 		return ;
 	}
 	printf("pid = %u\r\n", gamewindow.pid);
-	//3.´ò¿ª½ø³Ì
+	//3.æ‰“å¼€è¿›ç¨‹
 	//HANDLE game_handle = OpenProcess(PROCESS_ALL_ACCESS, NULL, gamewindow.pid);
 	//if (!game_handle)
 	//{
-	//	printf("´ò²»¿ª½ø³Ì\r\n", GetLastError());
+	//	printf("æ‰“ä¸å¼€è¿›ç¨‹\r\n", GetLastError());
 	//	return 0;
 	//}
 
-	//´´½¨Í¸Ã÷´°¿Ú
+	//åˆ›å»ºé€æ˜çª—å£
 	if (!this->CreateOvelayWindow())
 	{
-		printf("´´½¨Í¸Ã÷´°¿ÚÊ§°Ü\r\n");
+		printf("åˆ›å»ºé€æ˜çª—å£å¤±è´¥\r\n");
 		return ;
 	}
 	
-	//³õÊ¼»¯imgui
+	//åˆå§‹åŒ–imgui
 	if (!this->InitImgui())
 	{
-		printf("³õÊ¼»¯imguiÊ§°Ü\r\n");
+		printf("åˆå§‹åŒ–imguiå¤±è´¥\r\n");
 		return;
 	}
 
-	//ÏûÏ¢Ñ­»·
+	//æ¶ˆæ¯å¾ªç¯
 	this->MessageLoop();
 }
 
@@ -97,7 +99,7 @@ bool Visual::External::CreateOvelayWindow()
 	// Initialize Direct3D
 	if (!CreateDeviceD3D(overlaywindow.hwnd))
 	{
-		printf("´´½¨D3DÉè±¸Ê§°Ü\r\n");
+		printf("åˆ›å»ºD3Dè®¾å¤‡å¤±è´¥\r\n");
 		CleanupDeviceD3D();
 		::UnregisterClassW(wc.lpszClassName, wc.hInstance);
 		return false;
@@ -127,10 +129,20 @@ bool Visual::External::InitImgui()
 
 	
 
-	//´ÓÄÚ´æ¼ÓÔØ×ÖÌå
-	//io.Fonts->AddFontFromMemoryTTF((void*)font_data, font_size, 22.f, nullptr, io.Fonts->GetGlyphRangesChineseFull());
-	//´Ó±¾µØÎÄ¼ş¼ÓÔØ×ÖÌå
-	io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\Deng.ttf", 22.0f, nullptr, io.Fonts->GetGlyphRangesChineseFull());
+	// æ•™å­¦æ³¨é‡Šï¼šæŒ‰ä½ çš„è¦æ±‚ï¼Œå­—ä½“åªä» exe å½“å‰ç›®å½•è¯»å–ï¼š./font.otfã€‚
+	// è¿™æ ·éƒ¨ç½²æ—¶åªéœ€æŠŠå­—ä½“å’Œå¯æ‰§è¡Œæ–‡ä»¶æ”¾åœ¨åŒä¸€ç›®å½•å³å¯ã€‚
+	std::filesystem::path customFontPath{};
+	const std::filesystem::path candidate = std::filesystem::current_path() / "font.otf";
+	if (std::filesystem::exists(candidate))
+		customFontPath = candidate;
+
+	if (!customFontPath.empty())
+		uiFont = io.Fonts->AddFontFromFileTTF(customFontPath.string().c_str(), 22.0f, nullptr, io.Fonts->GetGlyphRangesChineseFull());
+
+	if (!uiFont)
+		uiFont = io.Fonts->AddFontDefault();
+
+	io.FontDefault = uiFont;
 
 
 	return true;
@@ -177,7 +189,7 @@ void Visual::External::MessageLoop()
 		ImGui::NewFrame();
 
 		{
-			//»æÖÆÇøÓò
+			//ç»˜åˆ¶åŒºåŸŸ
 			cheeto();
 		}
 
@@ -213,42 +225,42 @@ bool Visual::External::UpdateWindow()
 	POINT Point{};
 	RECT Rect{};
 
-	//²éÕÒÄ¿±ê´°¿Ú
+	//æŸ¥æ‰¾ç›®æ ‡çª—å£
 	gamewindow.hwnd = FindWindowA((gamewindow.ClassName.empty() ? NULL : gamewindow.ClassName.c_str()),
 		(gamewindow.WindowName.empty() ? NULL : gamewindow.WindowName.c_str()));
 	if (gamewindow.hwnd == NULL)
 		return false;
 
-	//»ñÈ¡Ä¿±ê´°¿ÚÎ»ÖÃ
+	//è·å–ç›®æ ‡çª—å£ä½ç½®
 	GetClientRect(gamewindow.hwnd, &Rect);
 	ClientToScreen(gamewindow.hwnd, &Point);
 
-	//¸üĞÂÍ¸Ã÷´°¿ÚÎ»ÖÃºÍ´óĞ¡
+	//æ›´æ–°é€æ˜çª—å£ä½ç½®å’Œå¤§å°
 	overlaywindow.pos = gamewindow.pos = ImVec2((float)Point.x, (float)Point.y);
 	overlaywindow.size = gamewindow.size = ImVec2((float)Rect.right, (float)Rect.bottom);
 	if (!SetWindowPos(overlaywindow.hwnd,HWND_TOPMOST,(int)overlaywindow.pos.x,(int)overlaywindow.pos.y,(int)overlaywindow.size.x,(int)overlaywindow.size.y,SWP_SHOWWINDOW))
 	{
-		printf("´°¿ÚÎ»ÖÃ¸üĞÂÊ§°Ü\r\n");
+		printf("çª—å£ä½ç½®æ›´æ–°å¤±è´¥\r\n");
 		return false;
 	}
 
-	//»ñÈ¡Êó±êÎ»ÖÃ Í¬²½µ½imguiÖĞ
+	//è·å–é¼ æ ‡ä½ç½® åŒæ­¥åˆ°imguiä¸­
 	POINT MousePos;
 	GetCursorPos(&MousePos);
 	ScreenToClient(overlaywindow.hwnd, &MousePos);
 	ImGui::GetIO().MousePos.x = (float)MousePos.x;
 	ImGui::GetIO().MousePos.y = (float)MousePos.y;
 
-	//Êó±ê´©Í¸
+	//é¼ æ ‡ç©¿é€
 	if (ImGui::GetIO().WantCaptureMouse)
 	{
-		//Èç¹ûÊó±êÔÚimgui²Ëµ¥ÖĞ ¾Í²»ÉèÖÃ³É·Ö²ã´°¿Ú
+		//å¦‚æœé¼ æ ‡åœ¨imguièœå•ä¸­ å°±ä¸è®¾ç½®æˆåˆ†å±‚çª—å£
 		//printf("WantCaptureMouse=true\r\n");
 		SetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE, GetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE) & (~WS_EX_LAYERED));
 	}
 	else
 	{
-		//Èç¹ûÊó±ê²»ÔÚimgui²Ëµ¥ÖĞ ¾ÍÉèÖÃ³É·Ö²ã´°¿Ú
+		//å¦‚æœé¼ æ ‡ä¸åœ¨imguièœå•ä¸­ å°±è®¾ç½®æˆåˆ†å±‚çª—å£
 		//printf("WantCaptureMouse=false\r\n");
 		SetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE, GetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE) | WS_EX_LAYERED);
 

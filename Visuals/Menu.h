@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <string>
+#include <vector>
 
 namespace Menu
 {
@@ -69,6 +70,16 @@ namespace Menu
 
 	inline bool helper请求记录 = false;
 	inline bool helper请求刷新 = false;
+	inline bool helper请求同步手雷类型 = false;
+	inline bool helper本次菜单已自动同步 = false;
 	inline std::string helper状态 = u8"未加载点位";
+
+	inline char config名称[64] = "default";
+	inline int config选择索引 = 0;
+	inline std::vector<std::string> config列表{};
+	inline bool config请求刷新列表 = false;
+	inline bool config请求保存 = false;
+	inline bool config请求加载 = false;
+	inline std::string config状态 = u8"未加载配置";
 
 }

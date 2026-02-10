@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #include "../imgui/imconfig.h"
 #include "../imgui/imgui.h"
 #include "../imgui/imgui_impl_dx11.h"
@@ -26,16 +26,16 @@ namespace Visual
 	class External
 	{
 	public:
-		struct windowInfo//´°¿ÚĞÅÏ¢½á¹¹Ìå
+		struct windowInfo//çª—å£ä¿¡æ¯ç»“æ„ä½“
 		{
-			HWND hwnd; //´°¿Ú¾ä±ú
-			DWORD pid; //´°¿ÚËùÊô½ø³Ìpid
+			HWND hwnd; //çª—å£å¥æŸ„
+			DWORD pid; //çª—å£æ‰€å±è¿›ç¨‹pid
 
 			std::string ClassName;
 			std::string WindowName;
 
-			ImVec2 pos;		//´°¿ÚÎ»ÖÃ
-			ImVec2 size;	//´°¿Ú³ß´ç
+			ImVec2 pos;		//çª—å£ä½ç½®
+			ImVec2 size;	//çª—å£å°ºå¯¸
 
 		};
 
@@ -45,20 +45,21 @@ namespace Visual
 		bool                     g_SwapChainOccluded = false;
 		UINT                     g_ResizeWidth = 0, g_ResizeHeight = 0;
 		ID3D11RenderTargetView* g_mainRenderTargetView = nullptr;
-		WNDCLASSEXW wc;//´°¿ÚÀà
-		windowInfo overlaywindow;//Í¸Ã÷´°¿ÚµÄ´°¿ÚĞÅÏ¢
-		windowInfo gamewindow;//ÓÎÏ·´°¿ÚµÄ´°¿ÚĞÅÏ¢
-		Cheat cheeto;	//»Øµ÷º¯ÊıÖ¸Õë ¸Ãº¯ÊıÓÃÓÚÏÔÊ¾²Ëµ¥¼°ÆäËû¹¦ÄÜ
+		WNDCLASSEXW wc;//çª—å£ç±»
+		windowInfo overlaywindow;//é€æ˜çª—å£çš„çª—å£ä¿¡æ¯
+		windowInfo gamewindow;//æ¸¸æˆçª—å£çš„çª—å£ä¿¡æ¯
+		ImFont* uiFont = nullptr;
+		Cheat cheeto;	//å›è°ƒå‡½æ•°æŒ‡é’ˆ è¯¥å‡½æ•°ç”¨äºæ˜¾ç¤ºèœå•åŠå…¶ä»–åŠŸèƒ½
 
 		void AttachWindow(std::string class_name, std::string window_name, Cheat cheat);
 	private:
 
 
 
-		bool CreateOvelayWindow();//´´½¨Í¸Ã÷´°¿Ú
-		bool InitImgui(); //³õÊ¼»¯imgui
-		void MessageLoop();//ÏûÏ¢Ñ­»·
-		bool UpdateWindow();//¸üĞÂ´°¿Ú
+		bool CreateOvelayWindow();//åˆ›å»ºé€æ˜çª—å£
+		bool InitImgui(); //åˆå§‹åŒ–imgui
+		void MessageLoop();//æ¶ˆæ¯å¾ªç¯
+		bool UpdateWindow();//æ›´æ–°çª—å£
 
 		bool CreateDeviceD3D(HWND hWnd);
 		void CleanupDeviceD3D();
