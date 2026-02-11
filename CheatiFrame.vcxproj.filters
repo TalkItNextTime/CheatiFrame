@@ -57,6 +57,21 @@
     <ClInclude Include="Cheats\OffsetsLoader.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Math\VisCheckCS2\Math.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\VisCheckCS2\OptimizedGeometry.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\VisCheckCS2\Parser.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\VisCheckCS2\VisCheck.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Math\VisCheckCS2\VisCheckRuntime.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ImGui\imgui.cpp">
@@ -99,6 +114,18 @@
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\OffsetsLoader.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Math\VisCheckCS2\OptimizedGeometry.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Math\VisCheckCS2\Parser.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Math\VisCheckCS2\VisCheck.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Math\VisCheckCS2\VisCheckRuntime.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>

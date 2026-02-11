@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <direct.h>
 #include <filesystem>
+#include <unordered_map>
 
 #include <rapidjson/document.h>
 #include <rapidjson/istreamwrapper.h>
@@ -31,8 +32,51 @@ namespace
 	using Cheats::GrenadeSpot;
 	using Cheats::kBoneCount;
 
+	const std::filesystem::path kConfigDir("Configs");
+	const std::filesystem::path kLastLoadedConfigFile = kConfigDir / "last_loaded.txt";
+
 	constexpr float kGrenadeEyeHeightDefault = 64.0f;
 	constexpr float kTextShadowOffset = 1.0f;
+
+	std::string TrimAsciiWhitespace(const std::string& value)
+	{
+		auto begin = value.begin();
+		while (begin != value.end() && std::isspace(static_cast<unsigned char>(*begin)))
+			++begin;
+
+		auto end = value.end();
+		while (end != begin && std::isspace(static_cast<unsigned char>(*(end - 1))))
+			--end;
+
+		return std::string(begin, end);
+	}
+
+	std::string ReadLastLoadedConfigName()
+	{
+		std::ifstream in(kLastLoadedConfigFile);
+		if (!in.is_open())
+			return {};
+
+		std::string name{};
+		std::getline(in, name);
+		return TrimAsciiWhitespace(name);
+	}
+
+	bool WriteLastLoadedConfigName(const std::string& name)
+	{
+		if (name.empty())
+			return false;
+
+		std::error_code ec{};
+		std::filesystem::create_directories(kConfigDir, ec);
+
+		std::ofstream out(kLastLoadedConfigFile, std::ios::trunc);
+		if (!out.is_open())
+			return false;
+
+		out << name;
+		return true;
+	}
 
 	// 教学注释：为了提升叠加层在亮背景上的可读性，所有文字都先绘制一层半透明黑色阴影，
 	// 再绘制前景色正文。这样在天空、墙面高亮、爆闪等场景里仍能清晰识别提示信息。
@@ -64,12 +108,14 @@ namespace
 		std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
 
 		if (lower == "standthrow")
-			return u8"直投";
+			return u8"站投";
 		if (lower == "jumpthrow")
 			return u8"跳投";
 		if (lower == "runthrow")
-			return u8"W跳投";
-		return throwType.empty() ? u8"直投" : throwType;
+			return u8"跑投";
+		if (lower == "runjumpthrow" || lower == "runjump")
+			return u8"跑跳投";
+		return throwType.empty() ? u8"站投" : throwType;
 	}
 
 	const char* GrenadeTypeLabelByIndex(const int index)
@@ -221,7 +267,7 @@ namespace
 	}
 
 	// 按骨骼数组区间连接线段，用于绘制骨架。
-	void ConnectBones(const EspPlayer& player, const ScreenSize& screen, int begin, int end)
+	void ConnectBones(const EspPlayer& player, const ScreenSize& screen, int begin, int end, ImColor boneColor)
 	{
 		Vector oldPoint{};
 		bool hasOldPoint = false;
@@ -234,7 +280,7 @@ namespace
 					ImGui::GetBackgroundDrawList()->AddLine(
 						{ oldPoint.x, oldPoint.y },
 						{ player.screenBones[i].x, player.screenBones[i].y },
-						ImColor(255, 255, 255));
+						boneColor);
 				}
 				oldPoint = { player.screenBones[i].x, player.screenBones[i].y };
 				hasOldPoint = true;
@@ -247,7 +293,7 @@ namespace
 	}
 
 	// 绘制2D方框ESP。
-	void DrawEsp2D(const EspPlayer& player, const ScreenSize& screen)
+	void DrawEsp2D(const EspPlayer& player, const ScreenSize& screen, ImColor color2d)
 	{
 		if (!player.hasBox2d)
 			return;
@@ -260,7 +306,7 @@ namespace
 		ImGui::GetBackgroundDrawList()->AddRect(
 			{ player.esp1.x, player.esp1.y },
 			{ player.esp2.x, player.esp2.y },
-			ImColor(255, 0, 0));
+			color2d);
 	}
 
 	// 绘制血量条，并按血量切换颜色。
@@ -301,22 +347,48 @@ namespace
 	}
 
 	// 绘制骨骼连线与头部圆圈。
-	void DrawBones(const EspPlayer& player, const ScreenSize& screen)
+	void DrawBones(const EspPlayer& player,
+		const ScreenSize& screen,
+		bool drawSkeleton,
+		ImColor boneColor,
+		ImColor visibleBoneColor,
+		bool drawVisibleBones)
 	{
-		ConnectBones(player, screen, 0, 2);
-		ConnectBones(player, screen, 3, 9);
-		ConnectBones(player, screen, 10, 14);
-
-		if (player.headScreen.z > 0.0f && player.originScreen.z > 0.0f)
+		if (drawSkeleton)
 		{
-			const float bodyHeight = std::max(1.0f, player.originScreen.y - player.headScreen.y);
-			const float headRadius = std::clamp(bodyHeight / 11.0f, 3.0f, 28.0f);
-			if (InScreen(screen, player.headScreen.x, player.headScreen.y))
+			ConnectBones(player, screen, 0, 2, boneColor);
+			ConnectBones(player, screen, 3, 9, boneColor);
+			ConnectBones(player, screen, 10, 14, boneColor);
+
+			if (player.headScreen.z > 0.0f && player.originScreen.z > 0.0f)
 			{
-				ImGui::GetBackgroundDrawList()->AddCircle(
-					{ player.headScreen.x, player.headScreen.y },
-					headRadius,
-					ImColor(255, 255, 255));
+				const float bodyHeight = std::max(1.0f, player.originScreen.y - player.headScreen.y);
+				const float headRadius = std::clamp(bodyHeight / 11.0f, 3.0f, 28.0f);
+				if (InScreen(screen, player.headScreen.x, player.headScreen.y))
+				{
+					ImGui::GetBackgroundDrawList()->AddCircle(
+						{ player.headScreen.x, player.headScreen.y },
+						headRadius,
+						boneColor);
+				}
+			}
+		}
+
+		if (drawVisibleBones)
+		{
+			for (size_t i = 0; i < kBoneCount; ++i)
+			{
+				if (!player.visibleBones[i])
+					continue;
+
+				const Vector& screenBone = player.screenBones[i];
+				if (screenBone.z <= 0.0f || !InScreen(screen, screenBone.x, screenBone.y))
+					continue;
+
+				ImGui::GetBackgroundDrawList()->AddCircleFilled(
+					{ screenBone.x, screenBone.y },
+					3.5f,
+					visibleBoneColor);
 			}
 		}
 	}
@@ -391,6 +463,8 @@ namespace
 
 namespace Cheats
 {
+	Game::~Game() = default;
+
 	// 全局入口：处理菜单热键、退出热键并驱动每帧逻辑。
 	void CheatMain()
 	{
@@ -403,6 +477,9 @@ namespace Cheats
 			if (Menu::DisplayToggle)
 			{
 				Menu::helper本次菜单已自动同步 = false;
+				Menu::helper列表等待本次菜单自动高亮 = true;
+				Menu::helper列表高亮点位ID = Menu::helper当前瞄准点位ID;
+				Menu::helper列表高亮待滚动 = (Menu::helper列表高亮点位ID > 0);
 			}
 			lastToggle = now;
 		}
@@ -452,6 +529,32 @@ namespace Cheats
 			return false;
 		}
 
+		Menu::config列表 = ListConfigs();
+		visRuntime = std::make_unique<VisCheckRuntime>();
+		{
+			const std::string lastLoaded = ReadLastLoadedConfigName();
+			if (!lastLoaded.empty())
+			{
+				std::string cfgError;
+				if (LoadConfig(lastLoaded, cfgError))
+				{
+					strncpy_s(Menu::config名称, lastLoaded.c_str(), _TRUNCATE);
+					auto it = std::find(Menu::config列表.begin(), Menu::config列表.end(), lastLoaded);
+					if (it != Menu::config列表.end())
+						Menu::config选择索引 = static_cast<int>(std::distance(Menu::config列表.begin(), it));
+					Menu::config状态 = std::string(u8"启动自动加载: ") + lastLoaded;
+				}
+				else
+				{
+					Menu::config状态 = std::string(u8"自动加载失败: ") + cfgError;
+				}
+			}
+			else
+			{
+				Menu::config状态 = u8"未找到上次加载配置";
+			}
+		}
+
 		initOk = true;
 		running = true;
 		StartThreads();
@@ -470,21 +573,34 @@ namespace Cheats
 			return;
 		}
 
+		// 教学注释：菜单里的“地图名”始终跟随当前实际地图，避免长期停留在默认 de_dust2。
+		std::string currentMap = NormalizeMapName(ReadCurrentMapName());
+		if (!currentMap.empty())
+			strncpy_s(Menu::helper地图名, currentMap.c_str(), _TRUNCATE);
+		else
+			currentMap = NormalizeMapName(Menu::helper地图名);
+
+		if (visRuntime)
+		{
+			Menu::utilVPK可视解析 = true;
+			visRuntime->SetEnabled(true);
+			visRuntime->UpdateMap(currentMap);
+			Menu::vpk可视状态 = visRuntime->GetStatusText();
+		}
+
+		if (!currentMap.empty())
+			EnsureGrenadeMapLoaded(currentMap);
+
 		UpdateSettingsSnapshot();
 		UpdateThreadEnableFlags();
 
 		SettingsSnapshot settings = SnapshotSettings();
 		RawState raw{};
-		EspState esp{};
 		AimState aim{};
 
 		{
 			std::shared_lock lock(shared.rawMutex);
 			raw = shared.raw;
-		}
-		{
-			std::shared_lock lock(shared.espMutex);
-			esp = shared.esp;
 		}
 		{
 			std::shared_lock lock(shared.aimMutex);
@@ -509,21 +625,20 @@ namespace Cheats
 			}
 		}
 
+		HandleGrenadeListRequests(raw, settings);
+
 		HandleConfigRequests(settings);
 
-		if (settings.helperEnabled)
 		{
-			std::string currentMap = ReadCurrentMapName();
-			if (currentMap.empty())
-				currentMap = NormalizeMapName(Menu::helper地图名);
-			EnsureGrenadeMapLoaded(currentMap);
+			std::shared_lock lock(shared.espMutex);
+			RenderEsp(shared.esp, settings);
 		}
-
-		RenderEsp(esp, settings);
 		RenderAim(aim);
 		if (settings.helperEnabled)
 			RenderGrenadeHelper(raw, settings);
-		RenderCrosshairInfo(raw, settings);
+		else
+			Menu::helper当前瞄准点位ID = 0;
+		RenderCrosshairInfo(raw.crosshairEnt, settings);
 	}
 
 	// 关闭模块：停止线程并释放系统句柄。
@@ -535,6 +650,7 @@ namespace Cheats
 			CloseHandle(gamehandle);
 			gamehandle = nullptr;
 		}
+		visRuntime.reset();
 	}
 
 	// 是否存在初始化失败状态。
@@ -582,15 +698,25 @@ namespace Cheats
 		snapshot.displayToggle = Menu::DisplayToggle;
 		snapshot.utilTeamCheck = Menu::util判断阵营;
 		snapshot.utilVisibleCheck = Menu::util可视检查;
+		Menu::utilVPK可视解析 = true;
+		snapshot.utilVpkVisibilityParse = true;
 		snapshot.utilDraw = Menu::util绘制总开关;
 		snapshot.visBox2D = Menu::vis方框透视;
 		snapshot.visBox3D = Menu::vis3DBox透视;
 		snapshot.visBones = Menu::vis绘制骨骼;
+		snapshot.visVisibleBones = Menu::vis绘制可视骨骼点;
 		snapshot.visHealth = Menu::vis绘制血条;
 		snapshot.visDistance = Menu::vis绘制距离;
 		snapshot.visCross = Menu::vis绘制准心;
+		for (int i = 0; i < 4; ++i)
+		{
+			snapshot.colorBones[i] = Menu::color骨骼[i];
+			snapshot.colorVisibleBones[i] = Menu::color可视骨骼[i];
+			snapshot.colorEsp2D[i] = Menu::color2DESP[i];
+		}
 		snapshot.aimDrawFov = Menu::aim绘制FOV;
 		snapshot.aimEnabled = Menu::aim自瞄;
+		snapshot.aimSmartBoneSelection = Menu::aim智能部位选择;
 		snapshot.aimRecoil = Menu::aim后座补偿;
 		snapshot.aimTrigger = Menu::aim扳机;
 		snapshot.aimbotFOV = Menu::aimbotFOV;
@@ -619,12 +745,18 @@ namespace Cheats
 		snapshot.helperMaxStandDrawDistance = Menu::helper站位最远绘制;
 		snapshot.helperLooseGuideDistance = Menu::helper非聚焦引导线距离;
 		snapshot.helperRecordDistance = Menu::helper记录瞄点距离;
+		snapshot.helperTopHintOffsetX = Menu::helper顶部提示偏移X;
+		snapshot.helperTopHintOffsetY = Menu::helper顶部提示偏移Y;
 		strncpy_s(snapshot.helperMapName, Menu::helper地图名, _TRUNCATE);
 		strncpy_s(snapshot.helperNote, Menu::helper备注, _TRUNCATE);
 		snapshot.helperRecordPending = Menu::helper请求记录;
 		snapshot.helperSyncGrenadeTypePending = Menu::helper请求同步手雷类型;
+		snapshot.helperListRefreshPending = Menu::helper列表请求刷新;
+		snapshot.helperListSavePending = Menu::helper列表请求保存;
 		Menu::helper请求记录 = false;
 		Menu::helper请求同步手雷类型 = false;
+		Menu::helper列表请求刷新 = false;
+		Menu::helper列表请求保存 = false;
 		snapshot.configRefreshPending = Menu::config请求刷新列表;
 		snapshot.configSavePending = Menu::config请求保存;
 		snapshot.configLoadPending = Menu::config请求加载;
@@ -654,6 +786,8 @@ namespace Cheats
 			std::scoped_lock grenadeLock(grenadeMutex);
 			if (!grenadeStatus.empty())
 				Menu::helper状态 = grenadeStatus;
+			if (!grenadeStatus.empty())
+				Menu::helper列表状态 = grenadeStatus;
 		}
 
 		std::unique_lock lock(shared.settingsMutex);
@@ -766,7 +900,7 @@ namespace Cheats
 			newRaw.shotsFired = Read<int>(localAddr + offsets.m_iShotsFired);
 			newRaw.aimPunch = Read<Vector>(localAddr + offsets.m_aimPunchAngle);
 
-			const bool needBones = settings.aimEnabled || (settings.utilDraw && settings.visBones);
+				const bool needBones = settings.aimEnabled || (settings.utilDraw && (settings.visBones || settings.visVisibleBones));
 			const bool needYaw = settings.utilDraw && settings.visBox3D;
 
 			for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
@@ -805,7 +939,7 @@ namespace Cheats
 				if (player.lifeState != 256)
 					continue;
 
-				if (settings.utilVisibleCheck)
+				if (settings.utilVisibleCheck && !settings.utilVpkVisibilityParse)
 					player.spotted = Read<bool>(player.pAddr + offsets.m_entitySpottedState + 0x08);
 				else
 					player.spotted = true;
@@ -851,6 +985,21 @@ namespace Cheats
 
 				player.valid = true;
 				newRaw.players[index] = player;
+
+#ifdef _DEBUG
+				if (settings.utilVpkVisibilityParse && visRuntime && (GetAsyncKeyState(VK_F1) & 1))
+				{
+					if (!visRuntime->IsMapLoaded())
+					{
+						printf("[VisCheck] idx=%d status=MAP_NOT_READY\n", index);
+					}
+					else
+					{
+						const int visibleBone = GetFirstVisibleBoneIndex(newRaw, player);
+						printf("[VisCheck] idx=%d any_bone=%s bone=%d\n", index, visibleBone >= 0 ? "VISIBLE" : "BLOCKED", visibleBone);
+					}
+				}
+#endif
 			}
 
 			newRaw.hasLocal = true;
@@ -884,6 +1033,7 @@ namespace Cheats
 
 			EspState newEsp{};
 			newEsp.screen = settings.screen;
+			newEsp.localTeam = raw.local.team;
 			if (settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(espSleepMs));
@@ -896,15 +1046,19 @@ namespace Cheats
 			newEsp.showCross = settings.visCross;
 
 			const bool needBoxes = settings.utilDraw && (settings.visBox2D || settings.visBox3D || settings.visHealth || settings.visDistance);
-			const bool needBones = settings.aimEnabled || (settings.utilDraw && settings.visBones);
+				const bool needBones = settings.aimEnabled || (settings.utilDraw && (settings.visBones || settings.visVisibleBones));
 			const bool need3d = settings.utilDraw && settings.visBox3D;
 
 			if (raw.hasMatrix)
 			{
+				int projectedCount = 0;
 				for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
 				{
 					const RawPlayer& rp = raw.players[index];
 					if (!rp.valid)
+						continue;
+
+					if (settings.utilTeamCheck && rp.team == raw.local.team)
 						continue;
 
 					EspPlayer ep{};
@@ -950,6 +1104,25 @@ namespace Cheats
 							if (WorldToScreen(worldBone, raw.matrix, settings.screen, screenBone))
 								ep.screenBones[i] = screenBone;
 						}
+
+							if (settings.utilVisibleCheck &&
+								settings.utilVpkVisibilityParse &&
+								visRuntime &&
+								visRuntime->IsMapLoaded() &&
+								(settings.aimEnabled || (settings.utilDraw && settings.visVisibleBones)))
+							{
+							const Vector localEye = raw.local.origin + raw.local.viewOffset;
+							for (size_t i = 0; i < kBoneCount; ++i)
+							{
+								const Vector& worldBone = rp.worldBones[i];
+								if (worldBone.IsZero())
+									continue;
+
+								ep.visibleBones[i] = IsBoneVisibleWithTolerance(localEye, worldBone);
+								if (ep.visibleBones[i])
+									ep.anyVisibleBone = true;
+							}
+						}
 					}
 
 					if (need3d)
@@ -984,7 +1157,11 @@ namespace Cheats
 					}
 
 					newEsp.players[index] = ep;
+					++projectedCount;
 				}
+
+				if (projectedCount >= 16)
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}
 
 			newEsp.hasData = true;
@@ -993,7 +1170,10 @@ namespace Cheats
 				shared.esp = newEsp;
 			}
 
-			std::this_thread::sleep_for(std::chrono::milliseconds(espSleepMs));
+			const int adaptiveEspSleepMs = (settings.visBones || settings.visBox3D)
+				? std::max(1, espSleepMs - 1)
+				: espSleepMs;
+			std::this_thread::sleep_for(std::chrono::milliseconds(adaptiveEspSleepMs));
 		}
 	}
 
@@ -1048,6 +1228,9 @@ namespace Cheats
 				int bestIndex = -1;
 				float bestDist = std::numeric_limits<float>::max();
 
+				std::array<int, kMaxPlayers> selectedAimBones{};
+				selectedAimBones.fill(std::clamp(settings.aimLocation, 0, static_cast<int>(kBoneCount) - 1));
+
 				if (settings.aimEnabled)
 				{
 					for (int i = 0; i < static_cast<int>(kMaxPlayers); ++i)
@@ -1059,12 +1242,52 @@ namespace Cheats
 
 						if (settings.utilTeamCheck && rp.team == raw.local.team)
 							continue;
-						if (settings.utilVisibleCheck && !rp.spotted)
-							continue;
+						if (settings.utilVisibleCheck)
+						{
+							if (settings.utilVpkVisibilityParse)
+							{
+								if (!visRuntime || !visRuntime->IsMapLoaded())
+									continue;
+
+									int firstVisibleBone = GetFirstVisibleBoneIndexFromEsp(rp, ep);
+									if (firstVisibleBone < 0)
+										firstVisibleBone = GetFirstVisibleBoneIndex(raw, rp);
+									if (firstVisibleBone < 0)
+										continue;
+
+								selectedAimBones[i] = firstVisibleBone;
+							}
+							else if (!rp.spotted)
+							{
+								continue;
+							}
+						}
 						if (rp.dis2LP > settings.aimbotDis * 75.0f)
 							continue;
 
-						const Vector target = ep.screenBones[settings.aimLocation];
+						int selectedAimBone = selectedAimBones[i];
+						if (settings.aimSmartBoneSelection && settings.utilVpkVisibilityParse)
+						{
+							if (!visRuntime || !visRuntime->IsMapLoaded())
+								continue;
+
+							selectedAimBone = GetBestVisibleAimBoneIndex(raw, rp, ep, settings);
+							if (selectedAimBone < 0)
+								continue;
+						}
+						else if (settings.utilVpkVisibilityParse)
+						{
+							if (selectedAimBone < 0 || selectedAimBone >= static_cast<int>(kBoneCount) || rp.worldBones[selectedAimBone].IsZero())
+								selectedAimBone = std::clamp(settings.aimLocation, 0, static_cast<int>(kBoneCount) - 1);
+						}
+						else if (!settings.utilVisibleCheck || !settings.utilVpkVisibilityParse)
+						{
+							selectedAimBone = std::clamp(settings.aimLocation, 0, static_cast<int>(kBoneCount) - 1);
+						}
+
+						selectedAimBones[i] = selectedAimBone;
+
+						const Vector target = ep.screenBones[selectedAimBone];
 						if (target.z <= 0.0f || !InScreen(settings.screen, target.x, target.y))
 							continue;
 
@@ -1080,7 +1303,8 @@ namespace Cheats
 				if (settings.aimEnabled && (GetAsyncKeyState(settings.aimKey) & 0x8000) && bestIndex != -1)
 				{
 					const EspPlayer& target = esp.players[bestIndex];
-					const Vector targetPos = target.screenBones[settings.aimLocation];
+					const int selectedAimBone = selectedAimBones[bestIndex];
+					const Vector targetPos = target.screenBones[selectedAimBone];
 					float moveX = 0.0f;
 					float moveY = 0.0f;
 
@@ -1109,7 +1333,27 @@ namespace Cheats
 						const int targetIndex = raw.crosshairEnt - 1;
 						const RawPlayer& target = raw.players[targetIndex];
 						if (target.valid && (!settings.utilTeamCheck || target.team != raw.local.team))
-							triggerShouldHold = true;
+						{
+							if (!settings.utilVisibleCheck)
+							{
+								triggerShouldHold = true;
+							}
+							else if (settings.utilVpkVisibilityParse)
+							{
+								if (visRuntime && visRuntime->IsMapLoaded())
+								{
+										int firstVisibleBone = GetFirstVisibleBoneIndexFromEsp(target, esp.players[targetIndex]);
+										if (firstVisibleBone < 0)
+											firstVisibleBone = GetFirstVisibleBoneIndex(raw, target);
+										if (firstVisibleBone >= 0)
+											triggerShouldHold = true;
+								}
+							}
+							else if (target.spotted)
+							{
+								triggerShouldHold = true;
+							}
+						}
 					}
 				}
 
@@ -1162,6 +1406,127 @@ namespace Cheats
 			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
 	}
 
+	const std::array<Game::SmartBoneCandidate, Game::kSmartBoneCandidateCount>& Game::GetSmartBonePriority() const
+	{
+		static const std::array<SmartBoneCandidate, kSmartBoneCandidateCount> kPriority = {
+			SmartBoneCandidate{ 0 },
+			SmartBoneCandidate{ 1 },
+			SmartBoneCandidate{ 2 },
+			SmartBoneCandidate{ 3 },
+			SmartBoneCandidate{ 4 },
+			SmartBoneCandidate{ 6 },
+			SmartBoneCandidate{ 5 },
+			SmartBoneCandidate{ 7 },
+			SmartBoneCandidate{ 8 },
+			SmartBoneCandidate{ 9 },
+			SmartBoneCandidate{ 10 },
+			SmartBoneCandidate{ 11 },
+			SmartBoneCandidate{ 12 },
+			SmartBoneCandidate{ 13 },
+			SmartBoneCandidate{ 14 }
+		};
+
+		return kPriority;
+	}
+
+	bool Game::IsBoneVisibleWithTolerance(const Vector& localEye, const Vector& worldBone) const
+	{
+		if (!visRuntime)
+			return false;
+
+		if (visRuntime->IsPointVisible(localEye, worldBone))
+			return true;
+
+		constexpr float kLateralProbe = 6.0f;
+		constexpr float kVerticalProbe = 3.0f;
+		const Vector probes[] = {
+			{ worldBone.x + kLateralProbe, worldBone.y, worldBone.z },
+			{ worldBone.x - kLateralProbe, worldBone.y, worldBone.z },
+			{ worldBone.x, worldBone.y + kLateralProbe, worldBone.z },
+			{ worldBone.x, worldBone.y - kLateralProbe, worldBone.z },
+			{ worldBone.x + kLateralProbe * 0.6f, worldBone.y + kLateralProbe * 0.6f, worldBone.z },
+			{ worldBone.x - kLateralProbe * 0.6f, worldBone.y - kLateralProbe * 0.6f, worldBone.z },
+			{ worldBone.x + kLateralProbe * 0.6f, worldBone.y - kLateralProbe * 0.6f, worldBone.z },
+			{ worldBone.x - kLateralProbe * 0.6f, worldBone.y + kLateralProbe * 0.6f, worldBone.z },
+			{ worldBone.x, worldBone.y, worldBone.z + kVerticalProbe },
+			{ worldBone.x, worldBone.y, worldBone.z - kVerticalProbe }
+		};
+
+		for (const Vector& probe : probes)
+		{
+			if (visRuntime->IsPointVisible(localEye, probe))
+				return true;
+		}
+
+		return false;
+	}
+
+	int Game::GetFirstVisibleBoneIndex(const RawState& raw, const RawPlayer& rp) const
+	{
+		if (!visRuntime || !visRuntime->IsMapLoaded())
+			return -1;
+
+		const Vector localEye = raw.local.origin + raw.local.viewOffset;
+		for (const SmartBoneCandidate& candidate : GetSmartBonePriority())
+		{
+			if (candidate.rawBoneIndex >= rp.worldBones.size())
+				continue;
+
+			const Vector& worldBone = rp.worldBones[candidate.rawBoneIndex];
+			if (worldBone.IsZero())
+				continue;
+
+			if (IsBoneVisibleWithTolerance(localEye, worldBone))
+				return static_cast<int>(candidate.rawBoneIndex);
+		}
+
+		return -1;
+	}
+
+	int Game::GetFirstVisibleBoneIndexFromEsp(const RawPlayer& rp, const EspPlayer& ep) const
+	{
+		for (const SmartBoneCandidate& candidate : GetSmartBonePriority())
+		{
+			if (candidate.rawBoneIndex >= rp.worldBones.size() ||
+				candidate.rawBoneIndex >= ep.visibleBones.size() ||
+				candidate.rawBoneIndex >= ep.screenBones.size())
+				continue;
+
+			if (!ep.visibleBones[candidate.rawBoneIndex])
+				continue;
+
+			const Vector& worldBone = rp.worldBones[candidate.rawBoneIndex];
+			const Vector& screenBone = ep.screenBones[candidate.rawBoneIndex];
+			if (worldBone.IsZero() || screenBone.z <= 0.0f)
+				continue;
+
+			return static_cast<int>(candidate.rawBoneIndex);
+		}
+
+		return -1;
+	}
+
+	int Game::GetBestVisibleAimBoneIndex(const RawState& raw,
+		const RawPlayer& rp,
+		const EspPlayer& ep,
+		const SettingsSnapshot& settings) const
+	{
+		if (!settings.utilVpkVisibilityParse || !visRuntime)
+			return -1;
+
+		int firstVisibleBone = GetFirstVisibleBoneIndexFromEsp(rp, ep);
+		if (firstVisibleBone < 0)
+			firstVisibleBone = GetFirstVisibleBoneIndex(raw, rp);
+		if (firstVisibleBone < 0 || firstVisibleBone >= static_cast<int>(ep.screenBones.size()))
+			return -1;
+
+		const Vector& screenBone = ep.screenBones[firstVisibleBone];
+		if (screenBone.z <= 0.0f || !InScreen(settings.screen, screenBone.x, screenBone.y))
+			return -1;
+
+		return firstVisibleBone;
+	}
+
 	// 渲染所有ESP可视化元素。
 	void Game::RenderEsp(const EspState& esp, const SettingsSnapshot& settings) const
 	{
@@ -1177,20 +1542,63 @@ namespace Cheats
 		if (!settings.utilDraw)
 			return;
 
+		const ImColor bonesColor(
+			settings.colorBones[0],
+			settings.colorBones[1],
+			settings.colorBones[2],
+			settings.colorBones[3]);
+		const ImColor visibleBonesColor(
+			settings.colorVisibleBones[0],
+			settings.colorVisibleBones[1],
+			settings.colorVisibleBones[2],
+			settings.colorVisibleBones[3]);
+		const ImColor esp2dColor(
+			settings.colorEsp2D[0],
+			settings.colorEsp2D[1],
+			settings.colorEsp2D[2],
+			settings.colorEsp2D[3]);
+
 		for (const auto& player : esp.players)
 		{
 			if (!player.valid)
 				continue;
 
-			if (settings.visBones)
-				DrawBones(player, esp.screen);
-			if (settings.visBox2D)
-				DrawEsp2D(player, esp.screen);
-			if (settings.visBox3D)
+			if (settings.utilTeamCheck && esp.localTeam > 0 && player.team == esp.localTeam)
+				continue;
+
+				const bool canUseBox = player.hasBox2d;
+				const bool canDrawSkeleton = player.headScreen.z > 0.0f && player.originScreen.z > 0.0f;
+				bool hasAnyScreenBone = false;
+				if (settings.visVisibleBones)
+				{
+					for (const auto& screenBone : player.screenBones)
+					{
+						if (screenBone.z > 0.0f)
+						{
+							hasAnyScreenBone = true;
+							break;
+						}
+					}
+				}
+				const bool canUse3d = player.has3dBox;
+
+				if ((settings.visBones && canDrawSkeleton) || (settings.visVisibleBones && hasAnyScreenBone))
+				{
+					DrawBones(
+						player,
+						esp.screen,
+						settings.visBones && canDrawSkeleton,
+						bonesColor,
+						visibleBonesColor,
+						settings.visVisibleBones);
+				}
+			if (settings.visBox2D && canUseBox)
+				DrawEsp2D(player, esp.screen, esp2dColor);
+			if (settings.visBox3D && canUse3d)
 				Draw3DBox(player);
-			if (settings.visHealth)
+			if (settings.visHealth && canUseBox)
 				DrawHealth(player);
-			if (settings.visDistance)
+			if (settings.visDistance && canUseBox)
 				DrawDistance(player, esp.screen);
 		}
 	}
@@ -1208,12 +1616,12 @@ namespace Cheats
 	}
 
 	// 渲染准星命中实体信息（调试/学习用）。
-	void Game::RenderCrosshairInfo(const RawState& raw, const SettingsSnapshot& settings) const
+	void Game::RenderCrosshairInfo(int crosshairEnt, const SettingsSnapshot& settings) const
 	{
-		if (raw.crosshairEnt > 0)
+		if (crosshairEnt > 0)
 		{
 			char buff[128];
-			sprintf_s(buff, "crosshair id:%d", raw.crosshairEnt);
+			sprintf_s(buff, "crosshair id:%d", crosshairEnt);
 			AddTextShadow(
 				ImGui::GetBackgroundDrawList(),
 				{ settings.screen.x * 0.5f - 120.0f, 150.0f },
@@ -1522,6 +1930,7 @@ namespace Cheats
 				loadedGrenadeMap = loaded.mapName;
 				grenadeStatus = u8"未找到点位文件，已创建空缓存: " + loaded.mapName;
 			}
+			Menu::helper列表请求刷新 = true;
 			error.clear();
 			return true;
 		}
@@ -1538,6 +1947,7 @@ namespace Cheats
 			sprintf_s(buff, u8"已加载 %zu 个点位 (%s)", loaded.spots.size(), loaded.mapName.c_str());
 			grenadeStatus = buff;
 		}
+		Menu::helper列表请求刷新 = true;
 		return true;
 	}
 
@@ -1559,6 +1969,131 @@ namespace Cheats
 		{
 			std::scoped_lock grenadeLock(grenadeMutex);
 			grenadeStatus = u8"加载点位失败: " + error;
+		}
+	}
+
+	// 教学注释：处理“列表管理页”的请求：刷新与保存。
+	// 刷新：把当前 grenadeData 映射到 UI 行数据；
+	// 保存：把 UI 行数据写回内存、序列化到 JSON，并立即重载当前地图点位。
+	void Game::HandleGrenadeListRequests(const RawState& raw, const SettingsSnapshot& settings)
+	{
+		if (!settings.helperListRefreshPending && !settings.helperListSavePending)
+			return;
+
+		std::string currentMap = ReadCurrentMapName();
+		if (currentMap.empty())
+			currentMap = NormalizeMapName(Menu::helper地图名);
+		if (currentMap.empty())
+			currentMap = NormalizeMapName(raw.hasLocal ? ReadCurrentMapName() : std::string{});
+		if (currentMap.empty())
+			currentMap = "de_dust2";
+
+		EnsureGrenadeMapLoaded(currentMap);
+
+		if (settings.helperListRefreshPending)
+		{
+			GrenadeMapData snapshot{};
+			{
+				std::scoped_lock grenadeLock(grenadeMutex);
+				snapshot = grenadeData;
+			}
+
+			Menu::helper列表数据.clear();
+			Menu::helper列表数据.reserve(snapshot.spots.size());
+			for (const auto& spot : snapshot.spots)
+			{
+				Menu::GrenadeListRow row{};
+				row.id = spot.id;
+				row.typeIndex = std::max(0, GrenadeTypeIndexByLabel(spot.type));
+				if (spot.throwType == "JumpThrow") row.throwIndex = 1;
+				else if (spot.throwType == "RunThrow") row.throwIndex = 2;
+				else if (spot.throwType == "RunJumpThrow") row.throwIndex = 3;
+				else row.throwIndex = 0;
+				strncpy_s(row.name, spot.name.c_str(), _TRUNCATE);
+				Menu::helper列表数据.push_back(row);
+			}
+
+			Menu::helper列表状态 = u8"列表已刷新";
+		}
+
+		if (settings.helperListSavePending)
+		{
+			bool writeOk = false;
+			{
+				std::scoped_lock grenadeLock(grenadeMutex);
+				std::unordered_map<int, size_t> idToIndex{};
+				for (size_t i = 0; i < grenadeData.spots.size(); ++i)
+					idToIndex[grenadeData.spots[i].id] = i;
+
+				std::vector<GrenadeSpot> rebuilt{};
+				rebuilt.reserve(Menu::helper列表数据.size());
+				for (const auto& src : Menu::helper列表数据)
+				{
+					GrenadeSpot dst{};
+					auto it = idToIndex.find(src.id);
+					if (it != idToIndex.end())
+						dst = grenadeData.spots[it->second];
+					dst.id = src.id;
+					dst.type = GrenadeTypeLabelByIndex(src.typeIndex);
+					switch (src.throwIndex)
+					{
+					case 1: dst.throwType = "JumpThrow"; break;
+					case 2: dst.throwType = "RunThrow"; break;
+					case 3: dst.throwType = "RunJumpThrow"; break;
+					default: dst.throwType = "StandThrow"; break;
+					}
+					dst.name = src.name;
+					if (dst.name.empty())
+						dst.name = "Unnamed";
+					rebuilt.push_back(std::move(dst));
+				}
+				grenadeData.spots = std::move(rebuilt);
+
+			{
+				rapidjson::Document doc;
+				doc.SetObject();
+				auto& allocator = doc.GetAllocator();
+
+				doc.AddMember("map_name", rapidjson::Value(currentMap.c_str(), allocator), allocator);
+				rapidjson::Value grenades(rapidjson::kArrayType);
+				for (const auto& spot : grenadeData.spots)
+				{
+					rapidjson::Value node(rapidjson::kObjectType);
+					node.AddMember("id", spot.id, allocator);
+					node.AddMember("type", rapidjson::Value(spot.type.c_str(), allocator), allocator);
+					node.AddMember("name", rapidjson::Value(spot.name.c_str(), allocator), allocator);
+					WriteVectorField(node, "position", spot.standPos, allocator);
+					WriteVectorField(node, "aim_target", spot.aimPos, allocator);
+					node.AddMember("throw_type", rapidjson::Value(spot.throwType.c_str(), allocator), allocator);
+					grenades.PushBack(node, allocator);
+				}
+				doc.AddMember("grenades", grenades, allocator);
+
+				const std::string filePath = std::string("GrenadeData\\") + NormalizeMapName(currentMap) + ".json";
+				std::ofstream out(filePath, std::ios::trunc);
+				if (out.is_open())
+				{
+					rapidjson::OStreamWrapper outWrapper(out);
+					rapidjson::PrettyWriter<rapidjson::OStreamWrapper> writer(outWrapper);
+					writer.SetIndent(' ', 2);
+					doc.Accept(writer);
+					writeOk = true;
+				}
+				else
+				{
+					Menu::helper列表状态 = u8"列表保存失败：无法写入文件";
+				}
+			}
+			}
+
+			if (writeOk)
+			{
+				std::string reloadError;
+				if (ReloadGrenadeMap(currentMap, reloadError))
+					Menu::helper列表状态 = u8"列表已保存并重载当前地图点位";
+				else
+					Menu::helper列表状态 = u8"保存成功，但重载失败: " + reloadError;
+			}
 		}
 	}
 
@@ -1631,6 +2166,7 @@ namespace Cheats
 				auto it = std::find(Menu::config列表.begin(), Menu::config列表.end(), cfgName);
 				if (it != Menu::config列表.end())
 					Menu::config选择索引 = static_cast<int>(std::distance(Menu::config列表.begin(), it));
+				WriteLastLoadedConfigName(cfgName);
 				Menu::config状态 = std::string(u8"加载成功: ") + cfgName;
 			}
 			else
@@ -1644,7 +2180,7 @@ namespace Cheats
 	std::vector<std::string> Game::ListConfigs() const
 	{
 		std::vector<std::string> names{};
-		const std::filesystem::path cfgDir("Configs");
+		const std::filesystem::path cfgDir = kConfigDir;
 
 		if (!std::filesystem::exists(cfgDir))
 			return names;
@@ -1673,8 +2209,8 @@ namespace Cheats
 			return false;
 		}
 
-		std::filesystem::create_directories("Configs");
-		const std::filesystem::path path = std::filesystem::path("Configs") / (name + ".json");
+		std::filesystem::create_directories(kConfigDir);
+		const std::filesystem::path path = kConfigDir / (name + ".json");
 
 		rapidjson::Document doc;
 		doc.SetObject();
@@ -1685,18 +2221,34 @@ namespace Cheats
 		rapidjson::Value visual(rapidjson::kObjectType);
 		visual.AddMember("team_check", Menu::util判断阵营, allocator);
 		visual.AddMember("visible_check", Menu::util可视检查, allocator);
+		visual.AddMember("vpk_visibility_parse", Menu::utilVPK可视解析, allocator);
 		visual.AddMember("draw_master", Menu::util绘制总开关, allocator);
 		visual.AddMember("box_2d", Menu::vis方框透视, allocator);
 		visual.AddMember("box_3d", Menu::vis3DBox透视, allocator);
 		visual.AddMember("bones", Menu::vis绘制骨骼, allocator);
+		visual.AddMember("visible_bones", Menu::vis绘制可视骨骼点, allocator);
 		visual.AddMember("health", Menu::vis绘制血条, allocator);
 		visual.AddMember("distance", Menu::vis绘制距离, allocator);
 		visual.AddMember("cross", Menu::vis绘制准心, allocator);
+
+		rapidjson::Value bonesColor(rapidjson::kArrayType);
+		rapidjson::Value visibleBonesColor(rapidjson::kArrayType);
+		rapidjson::Value esp2dColor(rapidjson::kArrayType);
+		for (int i = 0; i < 4; ++i)
+		{
+			bonesColor.PushBack(Menu::color骨骼[i], allocator);
+			visibleBonesColor.PushBack(Menu::color可视骨骼[i], allocator);
+			esp2dColor.PushBack(Menu::color2DESP[i], allocator);
+		}
+		visual.AddMember("bones_color", bonesColor, allocator);
+		visual.AddMember("visible_bones_color", visibleBonesColor, allocator);
+		visual.AddMember("esp2d_color", esp2dColor, allocator);
 		doc.AddMember("visual", visual, allocator);
 
 		rapidjson::Value aim(rapidjson::kObjectType);
 		aim.AddMember("draw_fov", Menu::aim绘制FOV, allocator);
 		aim.AddMember("enabled", Menu::aim自瞄, allocator);
+		aim.AddMember("smart_bone_selection", Menu::aim智能部位选择, allocator);
 		aim.AddMember("recoil", Menu::aim后座补偿, allocator);
 		aim.AddMember("trigger", Menu::aim扳机, allocator);
 		aim.AddMember("fov", Menu::aimbotFOV, allocator);
@@ -1728,6 +2280,8 @@ namespace Cheats
 		helper.AddMember("max_stand_draw_distance", Menu::helper站位最远绘制, allocator);
 		helper.AddMember("loose_guide_distance", Menu::helper非聚焦引导线距离, allocator);
 		helper.AddMember("record_distance", Menu::helper记录瞄点距离, allocator);
+		helper.AddMember("top_hint_offset_x", Menu::helper顶部提示偏移X, allocator);
+		helper.AddMember("top_hint_offset_y", Menu::helper顶部提示偏移Y, allocator);
 		helper.AddMember("map_name", rapidjson::Value(Menu::helper地图名, allocator), allocator);
 		helper.AddMember("note", rapidjson::Value(Menu::helper备注, allocator), allocator);
 		doc.AddMember("helper", helper, allocator);
@@ -1756,7 +2310,7 @@ namespace Cheats
 			return false;
 		}
 
-		const std::filesystem::path path = std::filesystem::path("Configs") / (name + ".json");
+		const std::filesystem::path path = kConfigDir / (name + ".json");
 		std::ifstream in(path);
 		if (!in.is_open())
 		{
@@ -1778,13 +2332,29 @@ namespace Cheats
 			const auto& visual = doc["visual"];
 			if (visual.HasMember("team_check") && visual["team_check"].IsBool()) Menu::util判断阵营 = visual["team_check"].GetBool();
 			if (visual.HasMember("visible_check") && visual["visible_check"].IsBool()) Menu::util可视检查 = visual["visible_check"].GetBool();
+			Menu::utilVPK可视解析 = true;
 			if (visual.HasMember("draw_master") && visual["draw_master"].IsBool()) Menu::util绘制总开关 = visual["draw_master"].GetBool();
 			if (visual.HasMember("box_2d") && visual["box_2d"].IsBool()) Menu::vis方框透视 = visual["box_2d"].GetBool();
 			if (visual.HasMember("box_3d") && visual["box_3d"].IsBool()) Menu::vis3DBox透视 = visual["box_3d"].GetBool();
 			if (visual.HasMember("bones") && visual["bones"].IsBool()) Menu::vis绘制骨骼 = visual["bones"].GetBool();
+			if (visual.HasMember("visible_bones") && visual["visible_bones"].IsBool()) Menu::vis绘制可视骨骼点 = visual["visible_bones"].GetBool();
 			if (visual.HasMember("health") && visual["health"].IsBool()) Menu::vis绘制血条 = visual["health"].GetBool();
 			if (visual.HasMember("distance") && visual["distance"].IsBool()) Menu::vis绘制距离 = visual["distance"].GetBool();
 			if (visual.HasMember("cross") && visual["cross"].IsBool()) Menu::vis绘制准心 = visual["cross"].GetBool();
+
+			auto LoadColorArray = [](const rapidjson::Value& src, float dst[4]) {
+				if (!src.IsArray() || src.Size() != 4)
+					return;
+				for (rapidjson::SizeType i = 0; i < 4; ++i)
+				{
+					if (src[i].IsNumber())
+						dst[i] = static_cast<float>(src[i].GetDouble());
+				}
+			};
+
+			if (visual.HasMember("bones_color")) LoadColorArray(visual["bones_color"], Menu::color骨骼);
+			if (visual.HasMember("visible_bones_color")) LoadColorArray(visual["visible_bones_color"], Menu::color可视骨骼);
+			if (visual.HasMember("esp2d_color")) LoadColorArray(visual["esp2d_color"], Menu::color2DESP);
 		}
 
 		if (doc.HasMember("aim") && doc["aim"].IsObject())
@@ -1792,6 +2362,7 @@ namespace Cheats
 			const auto& aim = doc["aim"];
 			if (aim.HasMember("draw_fov") && aim["draw_fov"].IsBool()) Menu::aim绘制FOV = aim["draw_fov"].GetBool();
 			if (aim.HasMember("enabled") && aim["enabled"].IsBool()) Menu::aim自瞄 = aim["enabled"].GetBool();
+			if (aim.HasMember("smart_bone_selection") && aim["smart_bone_selection"].IsBool()) Menu::aim智能部位选择 = aim["smart_bone_selection"].GetBool();
 			if (aim.HasMember("recoil") && aim["recoil"].IsBool()) Menu::aim后座补偿 = aim["recoil"].GetBool();
 			if (aim.HasMember("trigger") && aim["trigger"].IsBool()) Menu::aim扳机 = aim["trigger"].GetBool();
 			if (aim.HasMember("fov") && aim["fov"].IsNumber()) Menu::aimbotFOV = static_cast<float>(aim["fov"].GetDouble());
@@ -1825,6 +2396,8 @@ namespace Cheats
 			if (helper.HasMember("max_stand_draw_distance") && helper["max_stand_draw_distance"].IsNumber()) Menu::helper站位最远绘制 = static_cast<float>(helper["max_stand_draw_distance"].GetDouble());
 			if (helper.HasMember("loose_guide_distance") && helper["loose_guide_distance"].IsNumber()) Menu::helper非聚焦引导线距离 = static_cast<float>(helper["loose_guide_distance"].GetDouble());
 			if (helper.HasMember("record_distance") && helper["record_distance"].IsNumber()) Menu::helper记录瞄点距离 = static_cast<float>(helper["record_distance"].GetDouble());
+			if (helper.HasMember("top_hint_offset_x") && helper["top_hint_offset_x"].IsNumber()) Menu::helper顶部提示偏移X = static_cast<float>(helper["top_hint_offset_x"].GetDouble());
+			if (helper.HasMember("top_hint_offset_y") && helper["top_hint_offset_y"].IsNumber()) Menu::helper顶部提示偏移Y = static_cast<float>(helper["top_hint_offset_y"].GetDouble());
 			if (helper.HasMember("map_name") && helper["map_name"].IsString()) strncpy_s(Menu::helper地图名, helper["map_name"].GetString(), _TRUNCATE);
 			if (helper.HasMember("note") && helper["note"].IsString()) strncpy_s(Menu::helper备注, helper["note"].GetString(), _TRUNCATE);
 		}
@@ -1840,16 +2413,15 @@ namespace Cheats
 		// 2) 进行准星聚焦/鼠标悬停判定；
 		// 3) 绘制站位与聚类后的名称列表；
 		// 4) 绘制瞄点引导与顶部投掷方式提示。
+		Menu::helper当前瞄准点位ID = 0;
+
 		if (!raw.hasLocal || !raw.hasMatrix || settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
 			return;
 
-		GrenadeMapData data{};
-		{
-			std::scoped_lock grenadeLock(grenadeMutex);
-			data = grenadeData;
-		}
-
-		if (data.spots.empty())
+		// 教学注释：为减少“点位很多时每帧深拷贝数据”带来的卡顿和拖影，
+		// 这里改为在渲染期间直接读取共享缓存，不再复制整份 grenadeData。
+		std::scoped_lock grenadeLock(grenadeMutex);
+		if (grenadeData.spots.empty())
 			return;
 
 		const std::string currentWeapon = settings.helperManualTypeOverride
@@ -1876,8 +2448,8 @@ namespace Cheats
 
 		std::vector<StandDrawItem> standItems{};
 		std::vector<AimDrawItem> aimItems{};
-		standItems.reserve(data.spots.size());
-		aimItems.reserve(data.spots.size());
+		standItems.reserve(grenadeData.spots.size());
+		aimItems.reserve(grenadeData.spots.size());
 
 		const Vector localPos = raw.local.origin;
 		const Vector cross = GetCross(settings.screen);
@@ -1890,7 +2462,7 @@ namespace Cheats
 		const GrenadeSpot* closest = nullptr;
 		float minCrossDist = std::numeric_limits<float>::max();
 
-		for (const auto& spot : data.spots)
+		for (const auto& spot : grenadeData.spots)
 		{
 			if (settings.helperFilterByWeapon && spot.type != currentWeapon)
 				continue;
@@ -2094,6 +2666,8 @@ namespace Cheats
 
 		if (selectedSpot)
 		{
+			Menu::helper当前瞄准点位ID = selectedSpot->id;
+
 			std::string throwType = LocalizeThrowType(selectedSpot->throwType.empty() ? "StandThrow" : selectedSpot->throwType);
 			std::string topText = std::string(u8"投掷方式: ") + throwType;
 			if (!selectedSpot->name.empty())
@@ -2101,7 +2675,10 @@ namespace Cheats
 
 			const float fontSize = 30.0f;
 			const ImVec2 textSize = ImGui::GetFont()->CalcTextSizeA(fontSize, 2000.0f, 0.0f, topText.c_str());
-			const ImVec2 textPos{ (settings.screen.x - textSize.x) * 0.5f, 28.0f };
+			const ImVec2 textPos{
+				(settings.screen.x - textSize.x) * 0.5f + settings.helperTopHintOffsetX,
+				28.0f + settings.helperTopHintOffsetY
+			};
 
 			AddTextShadow(ImGui::GetBackgroundDrawList(), ImGui::GetFont(), fontSize, textPos, ImColor(255, 220, 120), topText.c_str());
 		}

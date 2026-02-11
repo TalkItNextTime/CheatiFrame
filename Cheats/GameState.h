@@ -67,15 +67,18 @@ namespace Cheats
 		int health = 0;
 		int team = 0;
 		bool spotted = false;
+		bool anyVisibleBone = false;
 		float dis2LP = 0.0f;
 		float yaw = 0.0f;
 		std::array<Vector, kBoneCount> screenBones{};
+		std::array<bool, kBoneCount> visibleBones{};
 	};
 
 	struct EspState
 	{
 		bool hasData = false;
 		ScreenSize screen{};
+		int localTeam = 0;
 		Vector cross{};
 		float fovRadius = 0.0f;
 		bool showFov = false;
@@ -94,15 +97,21 @@ namespace Cheats
 		bool displayToggle = false;
 		bool utilTeamCheck = true;
 		bool utilVisibleCheck = true;
+		bool utilVpkVisibilityParse = false;
 		bool utilDraw = true;
 		bool visBox2D = false;
 		bool visBox3D = false;
 		bool visBones = false;
+		bool visVisibleBones = true;
 		bool visHealth = true;
 		bool visDistance = false;
 		bool visCross = true;
+		std::array<float, 4> colorBones{ 1.0f, 1.0f, 1.0f, 1.0f };
+		std::array<float, 4> colorVisibleBones{ 0.2f, 1.0f, 0.2f, 1.0f };
+		std::array<float, 4> colorEsp2D{ 1.0f, 0.0f, 0.0f, 1.0f };
 		bool aimDrawFov = true;
 		bool aimEnabled = true;
+		bool aimSmartBoneSelection = false;
 		bool aimRecoil = false;
 		bool aimTrigger = true;
 		float aimbotFOV = 130.0f;
@@ -131,10 +140,14 @@ namespace Cheats
 		float helperMaxStandDrawDistance = 2000.0f;
 		float helperLooseGuideDistance = 5000.0f;
 		float helperRecordDistance = 10000.0f;
+		float helperTopHintOffsetX = 0.0f;
+		float helperTopHintOffsetY = 0.0f;
 		char helperMapName[64]{};
 		char helperNote[128]{};
 		bool helperRecordPending = false;
 		bool helperSyncGrenadeTypePending = false;
+		bool helperListRefreshPending = false;
+		bool helperListSavePending = false;
 		bool configRefreshPending = false;
 		bool configSavePending = false;
 		bool configLoadPending = false;

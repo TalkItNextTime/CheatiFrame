@@ -33,6 +33,9 @@ void Menu::ShowMenu()
 	}
 	ImGui::Checkbox(u8"判断阵营", &Menu::util判断阵营);
 	ImGui::Checkbox(u8"可视检查", &Menu::util可视检查);
+	Menu::utilVPK可视解析 = true;
+	ImGui::TextDisabled(u8"VPK地图可视解析: 已强制启用");
+	ImGui::TextWrapped(u8"%s", Menu::vpk可视状态.c_str());
 
 	//新建选项卡
 	if (ImGui::BeginTabBar(u8"选项卡"))
@@ -51,6 +54,12 @@ void Menu::ShowMenu()
 			//ImGui::Checkbox(u8"绘制连线", &Menu::DrawLine);
 			ImGui::Checkbox(u8"绘制距离", &Menu::vis绘制距离);
 			ImGui::Checkbox(u8"绘制骨骼", &Menu::vis绘制骨骼);
+			ImGui::Checkbox(u8"绘制可视骨骼点", &Menu::vis绘制可视骨骼点);
+
+			ImGui::SeparatorText(u8"颜色设置");
+			ImGui::ColorEdit4(u8"骨骼颜色", Menu::color骨骼);
+			ImGui::ColorEdit4(u8"可视骨骼颜色", Menu::color可视骨骼);
+			ImGui::ColorEdit4(u8"2D ESP颜色", Menu::color2DESP);
 
 			//ImGui::Checkbox(u8"绘制3D方框", &Menu::DrawDynamicESP);
 
@@ -72,6 +81,9 @@ void Menu::ShowMenu()
 			ImGui::Checkbox(u8"扳机", &Menu::aim扳机);
 			ImGui::SameLine();
 			ImGui::Checkbox(u8"后座补偿", &Menu::aim后座补偿);
+			ImGui::Checkbox(u8"智能部位选择", &Menu::aim智能部位选择);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"自动选择当前暴露在掩体外的骨骼部位进行瞄准。");
 
 			///ImGui::Combo(u8"自瞄热键", &Menu::DefaultAimHotKey, Menu::aimHotKey, IM_ARRAYSIZE(Menu::aimHotKey));
 			//ImGui::Combo(u8"扳机热键", &Menu::DefaultTriggleHotKey, Menu::TriggleHotKey, IM_ARRAYSIZE(Menu::TriggleHotKey));
@@ -125,6 +137,11 @@ void Menu::ShowMenu()
 
 		if (ImGui::BeginTabItem(u8"投掷物辅助"))
 		{
+			if (Menu::helper列表等待本次菜单自动高亮)
+			{
+				Menu::helper列表等待本次菜单自动高亮 = false;
+			}
+
 			if (!Menu::helper本次菜单已自动同步)
 			{
 				Menu::helper本次菜单已自动同步 = true;
@@ -133,6 +150,9 @@ void Menu::ShowMenu()
 
 			static const char* grenadeTypes[] = { u8"烟雾弹", u8"闪光弹", u8"高爆雷", u8"诱饵弹", u8"燃烧弹" };
 			static const char* throwTypes[] = { u8"站投", u8"跳投", u8"跑投" };
+			static const char* listGrenadeTypes[] = { u8"烟雾", u8"燃烧", u8"闪光", u8"手雷", u8"诱饵" };
+			static const char* rowGrenadeTypes[] = { u8"烟雾弹", u8"闪光弹", u8"高爆雷", u8"诱饵弹", u8"燃烧弹" };
+			static const char* rowThrowTypes[] = { u8"站投", u8"跳投", u8"跑投", u8"跑跳" };
 
 			ImGui::Checkbox(u8"启用投掷物辅助", &Menu::helper启用);
 			ImGui::Checkbox(u8"按当前手雷类型筛选", &Menu::helper按武器筛选);
@@ -148,9 +168,12 @@ void Menu::ShowMenu()
 
 			ImGui::SliderFloat(u8"站位判定容差", &Menu::helper站位容差, 10.0f, 120.0f, "%.1f");
 			ImGui::SliderFloat(u8"聚焦半径(像素)", &Menu::helper聚焦半径, 20.0f, 100.0f, "%.1f");
-			ImGui::SliderFloat(u8"站位最大绘制距离", &Menu::helper站位最远绘制, 500.0f, 5000.0f, "%.0f");
+			float drawDistMeter = Menu::helper站位最远绘制 / 75.0f;
+			if (ImGui::SliderFloat(u8"站位最大绘制距离(米)", &drawDistMeter, 6.0f, 80.0f, "%.1f m"))
+				Menu::helper站位最远绘制 = drawDistMeter * 75.0f;
 			ImGui::SliderFloat(u8"非聚焦引导线阈值", &Menu::helper非聚焦引导线距离, 50.0f, 8000.0f, "%.0f");
-			ImGui::SliderFloat(u8"记录瞄点距离", &Menu::helper记录瞄点距离, 2000.0f, 20000.0f, "%.0f");
+			ImGui::SliderFloat(u8"顶部投掷提示偏移X", &Menu::helper顶部提示偏移X, -600.0f, 1280.0f, "%.0f");
+			ImGui::SliderFloat(u8"顶部投掷提示偏移Y", &Menu::helper顶部提示偏移Y, -300.0f, 720.0f, "%.0f");
 
 			ImGui::Separator();
 			ImGui::InputText(u8"地图名", Menu::helper地图名, IM_ARRAYSIZE(Menu::helper地图名));
@@ -163,6 +186,97 @@ void Menu::ShowMenu()
 				Menu::helper请求刷新 = true;
 
 			ImGui::TextWrapped(u8"状态: %s", Menu::helper状态.c_str());
+
+			ImGui::Separator();
+			ImGui::Text(u8"点位列表管理");
+
+			if (Menu::helper列表数据.empty())
+				Menu::helper列表请求刷新 = true;
+
+			for (int i = 0; i < 5; ++i)
+			{
+				ImGui::Checkbox(listGrenadeTypes[i], &Menu::helper列表筛选类型[i]);
+				if (i != 4)
+					ImGui::SameLine();
+			}
+
+			if (ImGui::Button(u8"刷新列表"))
+				Menu::helper列表请求刷新 = true;
+			ImGui::SameLine();
+			if (ImGui::Button(u8"保存到文件"))
+				Menu::helper列表请求保存 = true;
+
+			ImGui::BeginChild("GrenadeManageList", ImVec2(0, 320), true);
+			if (ImGui::BeginTable("GrenadeManageTable", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY))
+			{
+				ImGui::TableSetupColumn(u8"序号", ImGuiTableColumnFlags_WidthFixed, 55.0f);
+				ImGui::TableSetupColumn(u8"类型", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+				ImGui::TableSetupColumn(u8"名称", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableSetupColumn(u8"投掷", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+				ImGui::TableSetupColumn(u8"操作", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+				ImGui::TableHeadersRow();
+
+				const bool anyFilterOn = Menu::helper列表筛选类型[0] || Menu::helper列表筛选类型[1] || Menu::helper列表筛选类型[2] || Menu::helper列表筛选类型[3] || Menu::helper列表筛选类型[4];
+				std::vector<size_t> toDelete{};
+
+				for (size_t i = 0; i < Menu::helper列表数据.size(); ++i)
+				{
+					auto& row = Menu::helper列表数据[i];
+					const bool isAutoHighlighted = (Menu::helper列表高亮点位ID > 0 && row.id == Menu::helper列表高亮点位ID);
+					const int filterIndex =
+						(row.typeIndex == 0) ? 0 :
+						(row.typeIndex == 4) ? 1 :
+						(row.typeIndex == 1) ? 2 :
+						(row.typeIndex == 2) ? 3 :
+						4;
+
+					if (anyFilterOn && (filterIndex < 0 || filterIndex >= 5 || !Menu::helper列表筛选类型[filterIndex]))
+						continue;
+
+					ImGui::PushID(static_cast<int>(row.id + static_cast<int>(i) * 1000));
+					ImGui::TableNextRow();
+					if (isAutoHighlighted)
+					{
+						ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImColor(242, 198, 46, 110));
+						if (Menu::helper列表高亮待滚动)
+						{
+							ImGui::SetScrollHereY(0.35f);
+							Menu::helper列表高亮待滚动 = false;
+						}
+					}
+					ImGui::TableSetColumnIndex(0);
+					ImGui::Text("%d", static_cast<int>(i + 1));
+
+					ImGui::TableSetColumnIndex(1);
+					ImGui::SetNextItemWidth(-1.0f);
+					ImGui::Combo("##Type", &row.typeIndex, rowGrenadeTypes, IM_ARRAYSIZE(rowGrenadeTypes));
+
+					ImGui::TableSetColumnIndex(2);
+					ImGui::SetNextItemWidth(-1.0f);
+					ImGui::InputText("##Name", row.name, IM_ARRAYSIZE(row.name));
+
+					ImGui::TableSetColumnIndex(3);
+					ImGui::SetNextItemWidth(-1.0f);
+					ImGui::Combo("##Throw", &row.throwIndex, rowThrowTypes, IM_ARRAYSIZE(rowThrowTypes));
+
+					ImGui::TableSetColumnIndex(4);
+					if (ImGui::Button(u8"删除"))
+						toDelete.push_back(i);
+
+					ImGui::PopID();
+				}
+
+				for (auto it = toDelete.rbegin(); it != toDelete.rend(); ++it)
+				{
+					if (*it < Menu::helper列表数据.size())
+						Menu::helper列表数据.erase(Menu::helper列表数据.begin() + static_cast<long long>(*it));
+				}
+
+				ImGui::EndTable();
+			}
+			ImGui::EndChild();
+
+			ImGui::TextWrapped(u8"列表状态: %s", Menu::helper列表状态.c_str());
 
 			ImGui::EndTabItem();
 		}
@@ -211,8 +325,6 @@ void Menu::ShowMenu()
 			ImGui::TextWrapped(u8"配置状态: %s", Menu::config状态.c_str());
 			ImGui::EndTabItem();
 		}
-
-
 
 		ImGui::EndTabBar();
 

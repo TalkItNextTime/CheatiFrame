@@ -5,6 +5,14 @@
 
 namespace Menu
 {
+	struct GrenadeListRow
+	{
+		int id = 0;
+		int typeIndex = 0;
+		int throwIndex = 0;
+		char name[128]{};
+	};
+
 	enum AimLoc
 	{
 		Head = 0, Chest = 1
@@ -18,15 +26,22 @@ namespace Menu
 
 	inline bool util判断阵营 = true;
 	inline bool util可视检查 = true;
+	inline bool utilVPK可视解析 = false;
+	inline std::string vpk可视状态 = "Map Status: (Disabled)";
 	inline bool util绘制总开关 = true;
 	inline bool vis方框透视 = false;
 	inline bool vis3DBox透视 = true;
 	inline bool vis绘制骨骼 = false;
+	inline bool vis绘制可视骨骼点 = true;
 	inline bool vis绘制血条 = true;
 	inline bool vis绘制距离 = false;
 	inline bool vis绘制准心 = true;
+	inline float color骨骼[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	inline float color可视骨骼[4] = { 0.2f, 1.0f, 0.2f, 1.0f };
+	inline float color2DESP[4] = { 1.0f, 0.0f, 0.0f, 1.0f };
 	inline bool aim绘制FOV = true;
 	inline bool aim自瞄 = true;
+	inline bool aim智能部位选择 = false;
 	//inline bool aim可视判断 = true;
 	inline bool aim后座补偿 = false;
 	inline bool aim扳机 = true;
@@ -67,6 +82,8 @@ namespace Menu
 	inline float helper站位最远绘制 = 2000.0f;
 	inline float helper非聚焦引导线距离 = 200.0f;
 	inline float helper记录瞄点距离 = 10000.0f;
+	inline float helper顶部提示偏移X = 0.0f;
+	inline float helper顶部提示偏移Y = 0.0f;
 
 	inline char helper地图名[64] = "de_dust2";
 	inline char helper备注[128] = "";
@@ -75,6 +92,15 @@ namespace Menu
 	inline bool helper请求刷新 = false;
 	inline bool helper请求同步手雷类型 = false;
 	inline bool helper本次菜单已自动同步 = false;
+	inline bool helper列表筛选类型[5] = { true, true, true, true, true };
+	inline bool helper列表请求刷新 = false;
+	inline bool helper列表请求保存 = false;
+	inline int helper当前瞄准点位ID = 0;
+	inline int helper列表高亮点位ID = 0;
+	inline bool helper列表等待本次菜单自动高亮 = false;
+	inline bool helper列表高亮待滚动 = false;
+	inline std::vector<GrenadeListRow> helper列表数据{};
+	inline std::string helper列表状态 = u8"未加载列表";
 	inline std::string helper状态 = u8"未加载点位";
 
 	inline char config名称[64] = "default";

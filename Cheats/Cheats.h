@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <array>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -17,6 +18,7 @@
 
 #include "GameState.h"
 #include "OffsetsData.h"
+#include "../Math/VisCheckCS2/VisCheckRuntime.h"
 
 namespace Cheats
 {
@@ -49,6 +51,8 @@ namespace Cheats
 	class Game
 	{
 	public:
+		~Game();
+
 		// 初始化作弊模块：打开进程、绑定模块、加载偏移并启动工作线程。
 		bool CheatInit();
 		// 每帧主入口：更新配置快照并执行绘制层逻辑。
@@ -62,6 +66,27 @@ namespace Cheats
 		const std::string& GetInitError() const;
 
 	private:
+		static constexpr size_t kSmartBoneCandidateCount = 15;
+
+		struct SmartBoneCandidate
+		{
+			size_t rawBoneIndex = 0;
+		};
+
+		// 返回用于智能部位选择的骨骼优先级数组（头->颈->胸->胃->骨盆->手臂）。
+		const std::array<SmartBoneCandidate, kSmartBoneCandidateCount>& GetSmartBonePriority() const;
+		// 带边缘容差的骨骼可视检测（主点失败时做偏移点补测）。
+		bool IsBoneVisibleWithTolerance(const Vector& localEye, const Vector& worldBone) const;
+		// 返回任意可视骨骼索引，若都不可视返回 -1。
+		int GetFirstVisibleBoneIndex(const RawState& raw, const RawPlayer& rp) const;
+		// 基于 ESP 线程已缓存的可视骨骼结果选择首个可视骨骼，失败返回 -1。
+		int GetFirstVisibleBoneIndexFromEsp(const RawPlayer& rp, const EspPlayer& ep) const;
+		// 根据 VPK 可视判定选择最佳骨骼索引，失败返回 -1。
+		int GetBestVisibleAimBoneIndex(const RawState& raw,
+			const RawPlayer& rp,
+			const EspPlayer& ep,
+			const SettingsSnapshot& settings) const;
+
 		// 创建并启动读取、ESP、自瞄三个工作线程。
 		void StartThreads();
 		// 通知并等待所有工作线程安全退出。
@@ -86,7 +111,7 @@ namespace Cheats
 		// 绘制后坐力补偿点等自瞄辅助信息。
 		void RenderAim(const AimState& aim) const;
 		// 绘制准星命中实体等调试信息。
-		void RenderCrosshairInfo(const RawState& raw, const SettingsSnapshot& settings) const;
+		void RenderCrosshairInfo(int crosshairEnt, const SettingsSnapshot& settings) const;
 
 		// 通过模块名查找目标进程模块基址。
 		uintptr_t BindModule(DWORD pid, std::wstring_view name);
@@ -102,6 +127,8 @@ namespace Cheats
 		bool ReloadGrenadeMap(const std::string& mapName, std::string& error);
 		// 如地图变化则自动重载点位。
 		void EnsureGrenadeMapLoaded(const std::string& mapName);
+		// 处理点位列表面板的刷新/保存请求。
+		void HandleGrenadeListRequests(const RawState& raw, const SettingsSnapshot& settings);
 		// 响应菜单中的配置系统请求（刷新列表/保存/加载）。
 		void HandleConfigRequests(const SettingsSnapshot& settings);
 		// 枚举 Configs 目录中可用配置名。
@@ -168,6 +195,8 @@ namespace Cheats
 		bool initAttempted = false;
 		bool initOk = false;
 		std::string initError{};
+
+		std::unique_ptr<VisCheckRuntime> visRuntime{};
 	};
 
 	inline Game gameName;

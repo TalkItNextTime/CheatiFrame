@@ -8,6 +8,23 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
 		return true;
 
+	// 教学注释：当 ImGui 正在接管键盘输入（例如 List 页输入备注）时，
+	// 直接吞掉键盘消息，避免按 A/W/空格 等按键透传到游戏导致角色位移。
+	if (ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard)
+	{
+		switch (msg)
+		{
+		case WM_KEYDOWN:
+		case WM_KEYUP:
+		case WM_SYSKEYDOWN:
+		case WM_SYSKEYUP:
+		case WM_CHAR:
+			return 1;
+		default:
+			break;
+		}
+	}
+
 	switch (msg)
 	{
 	case WM_CREATE:
