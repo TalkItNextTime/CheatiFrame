@@ -229,3 +229,9 @@ CheatiFrame/
 - 高频路径避免动态分配与多次小块 RPM
 - 统一通过 `SettingsSnapshot` 传播菜单配置，减少跨线程直接访问
 
+## 预览
+![menu1](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu1.jpg)
+![menu2](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu2.jpg)
+![menu3](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu3.jpg)
+![menu4](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu4.jpg)
+![throwhelper](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/throwhelper.jpg)
