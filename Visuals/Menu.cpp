@@ -206,7 +206,7 @@ void Menu::ShowMenu()
 			ImGui::Checkbox(u8"绘制站位", &Menu::helper绘制站位);
 			ImGui::Checkbox(u8"绘制瞄点", &Menu::helper绘制瞄点);
 			ImGui::TextWrapped(u8"说明: 手雷类型会在菜单每次重新显示后，首次打开本页时自动读取一次当前手持投掷物。"
-				u8"\n手动覆盖仅用于调试/录制：强制按你选择的手雷类型筛选或记录。关闭后恢复自动读取。");
+				u8"\n手动覆盖仅用于调试/录制：强制按选择的手雷类型筛选或记录。关闭后恢复自动读取。");
 
 			ImGui::Separator();
 			ImGui::Checkbox(u8"手动覆盖手雷类型", &Menu::helper手动类型覆盖);

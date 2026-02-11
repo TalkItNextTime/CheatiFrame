@@ -16,22 +16,22 @@
 
 namespace Cheats
 {
-	namespace
-	{
-		// 调试输出：将已加载的偏移值同时以十六进制/十进制打印到控制台。
-		void PrintLoadedOffset(const char* source, const std::string& name, std::uintptr_t value)
+		namespace
 		{
-		#ifdef _DEBUG
-			std::cout << "[OffsetsLoader][" << source << "] " << name
-				<< " = 0x" << std::hex << value
-				<< " (" << std::dec << value << ')'
-				<< '\n';
+			// 调试输出：将已加载的偏移值同时以十六进制/十进制打印到控制台。
+			void PrintLoadedOffset(const char* source, const std::string& name, std::uintptr_t value)
+			{
+		#if defined(_DEBUG) && defined(CHEATIFRAME_VERBOSE_OFFSETS)
+				std::cout << "[OffsetsLoader][" << source << "] " << name
+					<< " = 0x" << std::hex << value
+					<< " (" << std::dec << value << ')'
+					<< '\n';
 		#else
-			(void)source;
-			(void)name;
-			(void)value;
+				(void)source;
+				(void)name;
+				(void)value;
 		#endif
-		}
+			}
 
 		// 读取并解析JSON文件，要求根节点为对象类型。
 		bool ParseJsonFile(const std::string& path, rapidjson::Document& doc, std::string& error)
@@ -133,7 +133,8 @@ namespace Cheats
 			!ReadUintField(offsetsRoot, "dwLocalPlayerPawn", out.dwLocalPlayerPawn, error) ||
 			!ReadUintField(offsetsRoot, "dwLocalPlayerController", out.dwLocalPlayerController, error) ||
 			!ReadUintField(offsetsRoot, "dwGlobalVars", out.dwGlobalVars, error) ||
-			!ReadUintField(offsetsRoot, "dwPlantedC4", out.dwPlantedC4, error))
+			!ReadUintField(offsetsRoot, "dwPlantedC4", out.dwPlantedC4, error) ||
+			!ReadUintField(offsetsRoot, "dwWeaponC4", out.dwWeaponC4, error))
 		{
 			error = "offsets.json read failed: " + error;
 			return false;
@@ -145,6 +146,7 @@ namespace Cheats
 		PrintLoadedOffset("offsets.json", "dwLocalPlayerController", out.dwLocalPlayerController);
 		PrintLoadedOffset("offsets.json", "dwGlobalVars", out.dwGlobalVars);
 		PrintLoadedOffset("offsets.json", "dwPlantedC4", out.dwPlantedC4);
+		PrintLoadedOffset("offsets.json", "dwWeaponC4", out.dwWeaponC4);
 
 		rapidjson::Document buttonsDoc;
 		if (!ParseJsonFile(buttonsPath, buttonsDoc, error))
@@ -206,6 +208,11 @@ namespace Cheats
 			{ "C_PlantedC4", "m_bBombDefused", &out.m_bBombDefused },
 			{ "C_PlantedC4", "m_bBeingDefused", &out.m_bBeingDefused },
 			{ "C_PlantedC4", "m_nBombSite", &out.m_nBombSite },
+			{ "C_PlantedC4", "m_flC4Blow", &out.m_flC4Blow },
+			{ "C_PlantedC4", "m_flTimerLength", &out.m_flTimerLength },
+			{ "C_PlantedC4", "m_flDefuseLength", &out.m_flDefuseLength },
+			{ "C_PlantedC4", "m_flDefuseCountDown", &out.m_flDefuseCountDown },
+			{ "C_PlantedC4", "m_vecC4ExplodeSpectatePos", &out.m_vecC4ExplodeSpectatePos },
 			{ "C_CSPlayerPawn", "m_angEyeAngles", &out.m_angEyeAngles },
 			{ "C_BaseModelEntity", "m_vecViewOffset", &out.m_vecViewOffset },
 			{ "C_CSPlayerPawn", "m_pClippingWeapon", &out.m_pClippingWeapon },
@@ -219,6 +226,19 @@ namespace Cheats
 		{
 			if (!ReadClientField(classes, spec.className, spec.fieldName, *spec.target, error))
 			{
+				const bool optionalField =
+					std::string(spec.className) == "C_PlantedC4" &&
+					std::string(spec.fieldName) == "m_vecC4ExplodeSpectatePos";
+				if (optionalField)
+				{
+					*spec.target = 0;
+				#if defined(_DEBUG) && defined(CHEATIFRAME_VERBOSE_OFFSETS)
+					std::cout << "[OffsetsLoader][optional-miss] "
+						<< spec.className << "::" << spec.fieldName << '\n';
+				#endif
+					continue;
+				}
+
 				std::ostringstream oss;
 				oss << "client_dll.json read failed: " << spec.className << "::" << spec.fieldName << " - " << error;
 				error = oss.str();

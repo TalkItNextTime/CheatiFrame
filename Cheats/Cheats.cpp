@@ -113,7 +113,7 @@ namespace
 		return true;
 	}
 
-	// 教学注释：为了提升叠加层在亮背景上的可读性，所有文字都先绘制一层半透明黑色阴影，
+	// 注释：为了提升叠加层在亮背景上的可读性，所有文字都先绘制一层半透明黑色阴影，
 	// 再绘制前景色正文。这样在天空、墙面高亮、爆闪等场景里仍能清晰识别提示信息。
 	void AddTextShadow(ImDrawList* draw, const ImVec2& pos, ImColor color, const char* text)
 	{
@@ -124,7 +124,7 @@ namespace
 		draw->AddText(pos, color, text);
 	}
 
-	// 教学注释：该重载用于需要指定字号的文本（例如顶部的大号投掷方式提示），
+	// 注释：该重载用于需要指定字号的文本（例如顶部的大号投掷方式提示），
 	// 和普通文本一样先画阴影再画正文，避免大字在高亮背景下“发白”看不清。
 	void AddTextShadow(ImDrawList* draw, ImFont* font, float fontSize, const ImVec2& pos, ImColor color, const char* text)
 	{
@@ -135,7 +135,7 @@ namespace
 		draw->AddText(font, fontSize, pos, color, text);
 	}
 
-	// 教学注释：将英文投掷方式标准名转换为中文说明，便于在 HUD 提示和点位文本中直接阅读。
+	// 注释：将英文投掷方式标准名转换为中文说明，便于在 HUD 提示和点位文本中直接阅读。
 	// 这里使用不区分大小写比较，兼容历史 JSON 中的 StandThrow / standthrow 等写法。
 	std::string LocalizeThrowType(std::string throwType)
 	{
@@ -323,6 +323,28 @@ namespace
 		screenY -= 0.5f * y * screen.y + 0.5f;
 
 		out = { screenX, screenY, w };
+		return true;
+	}
+
+	bool WorldToScreenAllowOffscreen(const Vector& world, const view_matrix_t& matrix, const ScreenSize& screen, Vector& out)
+	{
+		float clipX = matrix[0][0] * world.x + matrix[0][1] * world.y + matrix[0][2] * world.z + matrix[0][3];
+		float clipY = matrix[1][0] * world.x + matrix[1][1] * world.y + matrix[1][2] * world.z + matrix[1][3];
+		float clipW = matrix[3][0] * world.x + matrix[3][1] * world.y + matrix[3][2] * world.z + matrix[3][3];
+
+		if (std::fabs(clipW) < 0.0001f)
+			return false;
+
+		if (clipW <= 0.0f)
+			return false;
+
+		const float invW = 1.0f / clipW;
+		const float ndcX = clipX * invW;
+		const float ndcY = clipY * invW;
+
+		out.x = (ndcX * 0.5f + 0.5f) * screen.x;
+		out.y = (0.5f - ndcY * 0.5f) * screen.y;
+		out.z = clipW;
 		return true;
 	}
 
@@ -515,10 +537,10 @@ namespace
 
 	void DrawBombEsp(const EspState& esp)
 	{
-		if (!esp.bombVisible || esp.bombScreen.z <= 0.0f)
+		if (!esp.bombVisible && !esp.bombPlanted)
 			return;
 
-		const char* siteName = "?";
+		const char* siteName = "Unknown";
 		switch (esp.bombSite)
 		{
 		case 0:
@@ -528,16 +550,75 @@ namespace
 			siteName = "B";
 			break;
 		default:
-			siteName = "?";
+			siteName = "未知";
 			break;
 		}
 
-		char buff[96]{};
-		sprintf_s(buff, "C4 [%s]%s", siteName, esp.bombBeingDefused ? " DEFUSING" : "");
+		const char* defuseText = esp.bombBeingDefused ? "正在拆包" : "未拆包";
 
-		const ImVec2 pos(esp.bombScreen.x + 8.0f, esp.bombScreen.y - 14.0f);
-		AddTextShadow(ImGui::GetBackgroundDrawList(), pos, ImColor(255, 120, 40), buff);
-		ImGui::GetBackgroundDrawList()->AddCircleFilled({ esp.bombScreen.x, esp.bombScreen.y }, 4.0f, ImColor(255, 120, 40));
+		char line1[96]{};
+		char line2[96]{};
+		sprintf_s(line1, "C4 点位: %s | %s", siteName, defuseText);
+		if (esp.bombBeingDefused)
+			sprintf_s(line2, "爆炸: %.1f秒  拆包: %.1f秒", std::max(0.0f, esp.bombTimeLeft), std::max(0.0f, esp.bombDefuseTimeLeft));
+		else
+			sprintf_s(line2, "爆炸: %.1f秒  拆包: --", std::max(0.0f, esp.bombTimeLeft));
+
+		auto* draw = ImGui::GetBackgroundDrawList();
+		if (esp.bombVisible)
+		{
+			const ImColor markerFill = esp.bombPlanted ? ImColor(255, 120, 40) : ImColor(240, 220, 70);
+			const ImColor markerRing = esp.bombPlanted ? ImColor(255, 180, 80) : ImColor(255, 240, 130);
+			draw->AddCircleFilled({ esp.bombScreen.x, esp.bombScreen.y }, 5.0f, markerFill);
+			draw->AddCircle({ esp.bombScreen.x, esp.bombScreen.y }, 10.0f, markerRing, 0, 1.5f);
+		}
+
+		if (!esp.bombPlanted)
+			return;
+
+		const float panelWidth = 248.0f;
+		const float panelX = std::clamp(300.0f, 12.0f, std::max(12.0f, esp.screen.x - panelWidth - 12.0f));
+		const float panelY = 18.0f;
+		const ImVec2 basePos(panelX + 10.0f, panelY + 8.0f);
+
+		draw->AddRectFilled(
+			{ panelX, panelY },
+			{ panelX + panelWidth, panelY + 92.0f },
+			ImColor(18, 18, 18, 190),
+			5.0f);
+		draw->AddRect(
+			{ panelX, panelY },
+			{ panelX + panelWidth, panelY + 92.0f },
+			ImColor(255, 145, 60, 180),
+			5.0f,
+			0,
+			1.2f);
+
+		AddTextShadow(draw, basePos, ImColor(255, 145, 60), line1);
+		AddTextShadow(draw, { basePos.x, basePos.y + 18.0f }, esp.bombBeingDefused ? ImColor(255, 70, 70) : ImColor(225, 225, 225), line2);
+
+		const float barLabelX = panelX + 10.0f;
+		const float barX = panelX + 42.0f;
+		const float barW = panelWidth - 52.0f;
+		const float barH = 8.0f;
+		const float explodeBarY = panelY + 52.0f;
+		const float defuseBarY = panelY + 70.0f;
+
+		AddTextShadow(draw, { barLabelX, explodeBarY - 2.0f }, ImColor(255, 180, 120), "爆");
+		draw->AddRectFilled({ barX, explodeBarY }, { barX + barW, explodeBarY + barH }, ImColor(40, 40, 40, 220), 2.0f);
+		if (esp.bombPlanted && esp.bombTimerLength > 0.001f)
+		{
+			const float explodeProgress = std::clamp(1.0f - (std::max(0.0f, esp.bombTimeLeft) / esp.bombTimerLength), 0.0f, 1.0f);
+			draw->AddRectFilled({ barX, explodeBarY }, { barX + barW * explodeProgress, explodeBarY + barH }, ImColor(255, 160, 60), 2.0f);
+		}
+
+		AddTextShadow(draw, { barLabelX, defuseBarY - 2.0f }, ImColor(130, 210, 255), "拆");
+		draw->AddRectFilled({ barX, defuseBarY }, { barX + barW, defuseBarY + barH }, ImColor(40, 40, 40, 220), 2.0f);
+		if (esp.bombPlanted && esp.bombBeingDefused && esp.bombDefuseProgress > 0.0f)
+		{
+			const float progress = std::clamp(esp.bombDefuseProgress, 0.0f, 1.0f);
+			draw->AddRectFilled({ barX, defuseBarY }, { barX + barW * progress, defuseBarY + barH }, ImColor(90, 190, 255, 210), 2.0f);
+		}
 	}
 
 	// 线程等待器：等待功能启用或程序退出。
@@ -581,10 +662,7 @@ namespace Cheats
 	// 全局入口：处理菜单热键、退出热键并驱动每帧逻辑。
 	void CheatMain()
 	{
-		static auto lastToggle = std::chrono::steady_clock::now();
-		auto now = std::chrono::steady_clock::now();
-
-		if (GetAsyncKeyState(VK_INSERT) && now - lastToggle >= std::chrono::milliseconds(200))
+		if (GetAsyncKeyState(VK_INSERT) & 1)
 		{
 			Menu::DisplayToggle = !Menu::DisplayToggle;
 			if (Menu::DisplayToggle)
@@ -594,7 +672,6 @@ namespace Cheats
 				Menu::helper列表高亮点位ID = Menu::helper当前瞄准点位ID;
 				Menu::helper列表高亮待滚动 = (Menu::helper列表高亮点位ID > 0);
 			}
-			lastToggle = now;
 		}
 
 		if (Menu::DisplayToggle)
@@ -686,7 +763,7 @@ namespace Cheats
 			return;
 		}
 
-		// 教学注释：菜单里的“地图名”始终跟随当前实际地图，避免长期停留在默认 de_dust2。
+		// 注释：菜单里的“地图名”始终跟随当前实际地图，避免长期停留在默认 de_dust2。
 		const std::uint64_t nowMs = GetNowMs();
 		std::string currentMap{};
 		if (!cachedMapName.empty() && (nowMs - cachedMapNameAtMs) < 1000)
@@ -987,10 +1064,18 @@ namespace Cheats
 
 	void Game::HandleMouseInputRequests(const SettingsSnapshot& settings)
 	{
+		static std::uint64_t nextAutoConnectAttemptMs = 0;
+		const std::uint64_t nowMs = GetNowMs();
+
 		const bool manualConnectRequested = settings.inputConnectRequest;
-		const bool shouldAutoConnect = settings.inputAutoConnect &&
+		const bool autoConnectEligible = settings.inputAutoConnect &&
 			settings.inputMethodSelected != static_cast<int>(InputBackend::WinAPI) &&
 			settings.inputMethodSelected != settings.inputMethodApplied;
+		const bool shouldAutoConnect =
+			autoConnectEligible &&
+			Menu::DisplayToggle &&
+			nowMs >= nextAutoConnectAttemptMs;
+		const bool isAutoConnectRun = shouldAutoConnect && !manualConnectRequested;
 
 		if (!manualConnectRequested && !shouldAutoConnect)
 			return;
@@ -1016,14 +1101,26 @@ namespace Cheats
 			Menu::输入方式选择 = static_cast<int>(params.backend);
 			Menu::输入连接成功 = true;
 			Menu::输入状态 = message;
-			std::string triggerDebug{};
-			if (mouseController.TriggerClickDebug(triggerDebug))
-				Menu::输入调试状态 = std::string(u8"连接后扳机测试成功: ") + triggerDebug;
+			if (manualConnectRequested)
+			{
+				std::string triggerDebug{};
+				if (mouseController.TriggerClickDebug(triggerDebug))
+					Menu::输入调试状态 = std::string(u8"连接后扳机测试成功: ") + triggerDebug;
+				else
+					Menu::输入调试状态 = std::string(u8"连接后扳机测试失败: ") + triggerDebug;
+			}
+			else if (isAutoConnectRun)
+			{
+				Menu::输入调试状态 = u8"自动连接成功";
+			}
 			else
-				Menu::输入调试状态 = std::string(u8"连接后扳机测试失败: ") + triggerDebug;
+			{
+				Menu::输入调试状态 = u8"连接成功";
+			}
 			Menu::输入提示 = message;
 			Menu::输入提示警告 = false;
 			Menu::输入提示截止时间Ms = GetNowMs() + 2500;
+			nextAutoConnectAttemptMs = nowMs + 3000;
 			return;
 		}
 
@@ -1037,6 +1134,7 @@ namespace Cheats
 
 		if (shouldAutoConnect)
 		{
+			nextAutoConnectAttemptMs = nowMs + 8000;
 			Menu::输入提示 = std::string(u8"自动连接失败，请检查参数后点击 Connect / Test: ") + message;
 		}
 	}
@@ -1117,49 +1215,148 @@ namespace Cheats
 			RawState newRaw{};
 			if (!ReadInto(client + offsets.dwEntityList, newRaw.entityList))
 				newRaw.entityList = 0;
-			if (!ReadInto(client + offsets.dwPlantedC4, newRaw.plantedC4))
-				newRaw.plantedC4 = 0;
-			if (newRaw.plantedC4)
-			{
-				if (offsets.m_bBombTicking)
-					safeReadCached(newRaw.plantedC4 + offsets.m_bBombTicking, newRaw.bombTicking, localCache);
-				if (offsets.m_bBombDefused)
-					safeReadCached(newRaw.plantedC4 + offsets.m_bBombDefused, newRaw.bombDefused, localCache);
-				if (offsets.m_bBeingDefused)
-					safeReadCached(newRaw.plantedC4 + offsets.m_bBeingDefused, newRaw.bombBeingDefused, localCache);
+			const std::uint64_t nowMs = GetNowMs();
+			static std::uint64_t bombPlantStartMs = 0;
+			static std::uint64_t bombDefuseStartMs = 0;
 
-				if (offsets.m_nBombSite)
+			std::uintptr_t plantedC4Holder = 0;
+			bool plantedFlag = false;
+			if (offsets.dwPlantedC4)
+			{
+				ReadInto(client + offsets.dwPlantedC4, plantedC4Holder);
+				if (offsets.dwPlantedC4 >= 0x8)
 				{
-					if (!ReadCached(newRaw.plantedC4 + offsets.m_nBombSite, newRaw.bombSite, localCache))
-						newRaw.bombSite = -1;
+					std::uint8_t plantedFlagByte = 0;
+					if (ReadInto(client + offsets.dwPlantedC4 - 0x8, plantedFlagByte))
+						plantedFlag = (plantedFlagByte != 0);
+				}
+			}
+			newRaw.bombPlantedFlag = plantedFlag;
+
+			if (plantedFlag && plantedC4Holder)
+			{
+				std::uintptr_t plantedC4Ptr = 0;
+				if (ReadInto(plantedC4Holder, plantedC4Ptr) && plantedC4Ptr)
+				{
+					newRaw.plantedC4 = plantedC4Ptr;
+					newRaw.bombSite = -1;
+					newRaw.bombTicking = false;
+					newRaw.bombDefused = false;
+					newRaw.bombBeingDefused = false;
+					newRaw.plantedC4Pos = {};
+					newRaw.bombTimerLength = 0.0f;
+					newRaw.bombDefuseLength = 0.0f;
+					newRaw.bombTimeLeft = 0.0f;
+					newRaw.bombDefuseTimeLeft = 0.0f;
+					newRaw.bombDefuseProgress = 0.0f;
+
+					if (offsets.m_nBombSite)
+						safeReadInto(plantedC4Ptr + offsets.m_nBombSite, newRaw.bombSite);
+					if (offsets.m_bBombTicking)
+						safeReadInto(plantedC4Ptr + offsets.m_bBombTicking, newRaw.bombTicking);
+					if (offsets.m_bBombDefused)
+						safeReadInto(plantedC4Ptr + offsets.m_bBombDefused, newRaw.bombDefused);
+					if (offsets.m_bBeingDefused)
+						safeReadInto(plantedC4Ptr + offsets.m_bBeingDefused, newRaw.bombBeingDefused);
+					if (offsets.m_flTimerLength)
+						safeReadInto(plantedC4Ptr + offsets.m_flTimerLength, newRaw.bombTimerLength);
+					if (offsets.m_flDefuseLength)
+						safeReadInto(plantedC4Ptr + offsets.m_flDefuseLength, newRaw.bombDefuseLength);
+
+					if (offsets.m_pGameSceneNode && offsets.m_vecAbsOrigin)
+					{
+						std::uintptr_t c4SceneNode = 0;
+						if (ReadInto(plantedC4Ptr + offsets.m_pGameSceneNode, c4SceneNode) && c4SceneNode)
+							safeReadInto(c4SceneNode + offsets.m_vecAbsOrigin, newRaw.plantedC4Pos);
+					}
+
+					if (newRaw.bombTicking)
+					{
+						if (bombPlantStartMs == 0)
+							bombPlantStartMs = nowMs;
+						const float plantElapsed = static_cast<float>(nowMs - bombPlantStartMs) / 1000.0f;
+						newRaw.bombTimeLeft = std::max(0.0f, newRaw.bombTimerLength - plantElapsed);
+					}
+					else
+					{
+						bombPlantStartMs = 0;
+						newRaw.bombTimeLeft = 0.0f;
+					}
+
+					if (newRaw.bombBeingDefused)
+					{
+						if (bombDefuseStartMs == 0)
+							bombDefuseStartMs = nowMs;
+						const float defuseElapsed = static_cast<float>(nowMs - bombDefuseStartMs) / 1000.0f;
+						newRaw.bombDefuseTimeLeft = std::max(0.0f, newRaw.bombDefuseLength - defuseElapsed);
+						const float totalDefuse = newRaw.bombDefuseLength > 0.001f ? newRaw.bombDefuseLength : 10.0f;
+						newRaw.bombDefuseProgress = std::clamp(1.0f - (newRaw.bombDefuseTimeLeft / totalDefuse), 0.0f, 1.0f);
+					}
+					else
+					{
+						bombDefuseStartMs = 0;
+						newRaw.bombDefuseTimeLeft = 0.0f;
+						newRaw.bombDefuseProgress = 0.0f;
+					}
+
+					if (newRaw.bombDefused)
+					{
+						bombPlantStartMs = 0;
+						bombDefuseStartMs = 0;
+					}
 				}
 				else
 				{
+					newRaw.plantedC4 = 0;
+					newRaw.bombTicking = false;
+					newRaw.bombDefused = false;
+					newRaw.bombBeingDefused = false;
 					newRaw.bombSite = -1;
-				}
-
-				safeReadCached(newRaw.plantedC4 + offsets.m_vOldOrigin, newRaw.plantedC4Pos, localCache);
-				if (offsets.m_vecAbsOrigin)
-				{
-					std::uintptr_t c4SceneNode = 0;
-					safeReadCached(newRaw.plantedC4 + offsets.m_pGameSceneNode, c4SceneNode, localCache);
-					if (c4SceneNode)
-					{
-						Vector absOrigin{};
-						safeReadInto(c4SceneNode + offsets.m_vecAbsOrigin, absOrigin);
-						if (!absOrigin.IsZero())
-							newRaw.plantedC4Pos = absOrigin;
-					}
+					newRaw.plantedC4Pos = {};
+					newRaw.bombTimerLength = 0.0f;
+					newRaw.bombDefuseLength = 0.0f;
+					newRaw.bombTimeLeft = 0.0f;
+					newRaw.bombDefuseTimeLeft = 0.0f;
+					newRaw.bombDefuseProgress = 0.0f;
 				}
 			}
 			else
 			{
+				bombPlantStartMs = 0;
+				bombDefuseStartMs = 0;
+				newRaw.plantedC4 = 0;
 				newRaw.bombTicking = false;
 				newRaw.bombDefused = false;
 				newRaw.bombBeingDefused = false;
 				newRaw.bombSite = -1;
 				newRaw.plantedC4Pos = {};
+				newRaw.bombTimerLength = 0.0f;
+				newRaw.bombDefuseLength = 0.0f;
+				newRaw.bombTimeLeft = 0.0f;
+				newRaw.bombDefuseTimeLeft = 0.0f;
+				newRaw.bombDefuseProgress = 0.0f;
+
+				if (offsets.dwWeaponC4)
+				{
+					std::uintptr_t weaponC4Holder = 0;
+					if (ReadInto(client + offsets.dwWeaponC4, weaponC4Holder) && weaponC4Holder)
+					{
+						std::uintptr_t weaponC4Entity = 0;
+						if (ReadInto(weaponC4Holder, weaponC4Entity) && weaponC4Entity)
+						{
+							newRaw.plantedC4 = weaponC4Entity;
+							if (offsets.m_pGameSceneNode && offsets.m_vecAbsOrigin)
+							{
+								std::uintptr_t weaponSceneNode = 0;
+								if (ReadInto(weaponC4Entity + offsets.m_pGameSceneNode, weaponSceneNode) && weaponSceneNode)
+									safeReadInto(weaponSceneNode + offsets.m_vecAbsOrigin, newRaw.plantedC4Pos);
+							}
+						}
+					}
+				}
 			}
+
+			(void)settings;
 			if (!newRaw.entityList)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(readSleepMs));
@@ -1167,7 +1364,24 @@ namespace Cheats
 			}
 
 			safeReadInto(client + offsets.dwViewMatrix, newRaw.matrix);
-			newRaw.hasMatrix = newRaw.matrix[0][0] != 0.0f;
+			const float matrixEnergy =
+				std::fabs(newRaw.matrix[0][0]) + std::fabs(newRaw.matrix[0][1]) + std::fabs(newRaw.matrix[0][2]) + std::fabs(newRaw.matrix[0][3]) +
+				std::fabs(newRaw.matrix[1][0]) + std::fabs(newRaw.matrix[1][1]) + std::fabs(newRaw.matrix[1][2]) + std::fabs(newRaw.matrix[1][3]) +
+				std::fabs(newRaw.matrix[2][0]) + std::fabs(newRaw.matrix[2][1]) + std::fabs(newRaw.matrix[2][2]) + std::fabs(newRaw.matrix[2][3]) +
+				std::fabs(newRaw.matrix[3][0]) + std::fabs(newRaw.matrix[3][1]) + std::fabs(newRaw.matrix[3][2]) + std::fabs(newRaw.matrix[3][3]);
+			static view_matrix_t lastGoodReadMatrix{};
+			static bool hasLastGoodReadMatrix = false;
+			newRaw.hasMatrix = matrixEnergy > 0.001f;
+			if (newRaw.hasMatrix)
+			{
+				lastGoodReadMatrix = newRaw.matrix;
+				hasLastGoodReadMatrix = true;
+			}
+			else if (hasLastGoodReadMatrix)
+			{
+				newRaw.matrix = lastGoodReadMatrix;
+				newRaw.hasMatrix = true;
+			}
 
 		std::uintptr_t localAddr = 0;
 		safeReadInto(client + offsets.dwLocalPlayerPawn, localAddr);
@@ -1410,6 +1624,13 @@ namespace Cheats
 			newEsp.showFov = settings.utilDraw && settings.aimDrawFov;
 			newEsp.showCross = settings.visCross;
 			newEsp.bombVisible = false;
+			newEsp.bombPlanted = raw.bombPlantedFlag && raw.bombTicking && !raw.bombDefused;
+			newEsp.bombSite = raw.bombSite;
+			newEsp.bombBeingDefused = raw.bombBeingDefused;
+			newEsp.bombTimerLength = raw.bombTimerLength;
+			newEsp.bombTimeLeft = raw.bombTimeLeft;
+			newEsp.bombDefuseTimeLeft = raw.bombDefuseTimeLeft;
+			newEsp.bombDefuseProgress = raw.bombDefuseProgress;
 
 			const bool needBoxes = settings.utilDraw && (settings.visBox2D || settings.visBox3D || settings.visHealth || settings.visDistance);
 			const bool needVpkAimBones =
@@ -1418,18 +1639,32 @@ namespace Cheats
 				settings.utilVpkVisibilityParse;
 			const bool needBones = needVpkAimBones || settings.aimEnabled || (settings.utilDraw && (settings.visBones || settings.visVisibleBones));
 			const bool need3d = settings.utilDraw && settings.visBox3D;
+			static view_matrix_t lastGoodMatrix{};
+			static bool hasLastGoodMatrix = false;
 
+			const view_matrix_t* activeMatrix = nullptr;
 			if (raw.hasMatrix)
 			{
-				if (settings.utilDraw && settings.visBombEsp && raw.plantedC4 && raw.bombTicking && !raw.bombDefused)
+				lastGoodMatrix = raw.matrix;
+				hasLastGoodMatrix = true;
+				activeMatrix = &raw.matrix;
+			}
+			else if (hasLastGoodMatrix)
+			{
+				activeMatrix = &lastGoodMatrix;
+			}
+
+			if (activeMatrix)
+			{
+				if (settings.utilDraw && settings.visBombEsp && !raw.plantedC4Pos.IsZero())
 				{
 					Vector bombScreen{};
-					if (WorldToScreen(raw.plantedC4Pos, raw.matrix, settings.screen, bombScreen))
+					if (WorldToScreen(raw.plantedC4Pos, *activeMatrix, settings.screen, bombScreen) ||
+						WorldToScreenAllowOffscreen(raw.plantedC4Pos, *activeMatrix, settings.screen, bombScreen))
 					{
+						bombScreen = ClampToScreenEdge(settings.screen, bombScreen, 18.0f);
 						newEsp.bombVisible = true;
 						newEsp.bombScreen = bombScreen;
-						newEsp.bombSite = raw.bombSite;
-						newEsp.bombBeingDefused = raw.bombBeingDefused;
 					}
 				}
 
@@ -1463,8 +1698,8 @@ namespace Cheats
 							headWorld = rp.origin;
 							headWorld.z += 68.0f;
 						}
-						if (WorldToScreen(rp.origin, raw.matrix, settings.screen, originScreen) &&
-							WorldToScreen(headWorld, raw.matrix, settings.screen, headScreen))
+						if (WorldToScreen(rp.origin, *activeMatrix, settings.screen, originScreen) &&
+							WorldToScreen(headWorld, *activeMatrix, settings.screen, headScreen))
 						{
 							ep.originScreen = originScreen;
 							ep.headScreen = headScreen;
@@ -1484,7 +1719,7 @@ namespace Cheats
 								continue;
 
 							Vector screenBone{};
-							if (WorldToScreen(worldBone, raw.matrix, settings.screen, screenBone))
+							if (WorldToScreen(worldBone, *activeMatrix, settings.screen, screenBone))
 								ep.screenBones[i] = screenBone;
 						}
 
@@ -1550,8 +1785,8 @@ namespace Cheats
 
 							Vector bottomScreen{};
 							Vector topScreen{};
-							if (!WorldToScreen(bottomWorld, raw.matrix, settings.screen, bottomScreen) ||
-								!WorldToScreen(topWorld, raw.matrix, settings.screen, topScreen))
+							if (!WorldToScreen(bottomWorld, *activeMatrix, settings.screen, bottomScreen) ||
+								!WorldToScreen(topWorld, *activeMatrix, settings.screen, topScreen))
 							{
 								allOk = false;
 								break;
@@ -1567,8 +1802,8 @@ namespace Cheats
 					++projectedCount;
 				}
 
-				if (projectedCount >= 16)
-					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				if (projectedCount >= 48)
+					std::this_thread::yield();
 			}
 
 			newEsp.hasData = true;
@@ -2231,6 +2466,8 @@ namespace Cheats
 	// 渲染准星命中实体信息（调试/学习用）。
 	void Game::RenderCrosshairInfo(int crosshairEnt, const SettingsSnapshot& settings) const
 	{
+		(void)settings;
+
 		if (crosshairEnt > 0)
 		{
 			char buff[128];
@@ -2313,7 +2550,7 @@ namespace Cheats
 
 	void Game::TryRecordGrenadeSpot(const RawState& raw, const SettingsSnapshot& settings)
 	{
-		// 教学注释：该函数负责把“当前玩家站位 + 当前视角瞄点”固化到 JSON。
+		// 注释：该函数负责把“当前玩家站位 + 当前视角瞄点”固化到 JSON。
 		// 录制流程：
 		// 1) 读取地图名与手雷类型；
 		// 2) 计算站位点与远端瞄点（基于 pitch/yaw）；
@@ -2394,7 +2631,7 @@ namespace Cheats
 
 	bool Game::LoadGrenadeJsonFile(const std::string& filePath, GrenadeMapData& out, std::string& error) const
 	{
-		// 教学注释：读取并解析单张地图的投掷点 JSON。
+		// 注释：读取并解析单张地图的投掷点 JSON。
 		// 为了增强健壮性，这里采用“跳过坏条目”策略：
 		// 只要条目关键字段缺失，就忽略该条并继续解析下一条。
 		std::ifstream stream(filePath);
@@ -2468,7 +2705,7 @@ namespace Cheats
 		const GrenadeSpot& spot,
 		std::string& error) const
 	{
-		// 教学注释：将新点位“增量追加”到地图 JSON。
+		// 注释：将新点位“增量追加”到地图 JSON。
 		// 若文件已存在则先读再追加，保证历史点位不会被覆盖；
 		// 同时自动分配递增 id，方便后续做删除/编辑功能。
 		rapidjson::Document doc;
@@ -2531,7 +2768,7 @@ namespace Cheats
 
 	bool Game::ReloadGrenadeMap(const std::string& mapName, std::string& error)
 	{
-		// 教学注释：重载某张地图的点位缓存。
+		// 注释：重载某张地图的点位缓存。
 		// 这是“文件层 -> 内存层”的同步入口：
 		// - 文件不存在：创建空缓存并提示；
 		// - 文件存在：解析后替换缓存并更新版本号。
@@ -2573,7 +2810,7 @@ namespace Cheats
 
 	void Game::EnsureGrenadeMapLoaded(const std::string& mapName)
 	{
-		// 教学注释：仅在地图名变化时才触发重载，避免每帧都访问磁盘。
+		// 注释：仅在地图名变化时才触发重载，避免每帧都访问磁盘。
 		const std::string normalized = NormalizeMapName(mapName);
 		if (normalized.empty())
 			return;
@@ -2592,7 +2829,7 @@ namespace Cheats
 		}
 	}
 
-	// 教学注释：处理“列表管理页”的请求：刷新与保存。
+	// 注释：处理“列表管理页”的请求：刷新与保存。
 	// 刷新：把当前 grenadeData 映射到 UI 行数据；
 	// 保存：把 UI 行数据写回内存、序列化到 JSON，并立即重载当前地图点位。
 	void Game::HandleGrenadeListRequests(const RawState& raw, const SettingsSnapshot& settings)
@@ -2726,7 +2963,7 @@ namespace Cheats
 		}
 	}
 
-	// 教学注释：统一处理配置系统请求，避免在渲染线程中直接进行文件 IO。
+	// 注释：统一处理配置系统请求，避免在渲染线程中直接进行文件 IO。
 	// 设计要点：
 	// 1) 菜单只负责设置“请求标记”；
 	// 2) 主逻辑在每帧读取快照后集中处理请求；
@@ -2931,18 +3168,81 @@ namespace Cheats
 		out.valid = true;
 		out.cross = cross;
 		out.selectedSpotId = selectedSpot ? selectedSpot->id : 0;
-		out.standItems.reserve(standItems.size());
 		out.aimItems.reserve(aimItems.size());
 
 		if (settings.helperDrawStand)
 		{
+			struct StandCluster
+			{
+				Vector center{};
+				std::string textList{};
+				int count = 0;
+			};
+
+			auto makeStandText = [&](const GrenadeSpot* spot) -> std::string
+			{
+				if (!spot)
+					return {};
+				std::string line = spot->name;
+				if (!spot->throwType.empty())
+					line += " [" + LocalizeThrowType(spot->throwType) + "]";
+				return line;
+			};
+
+			auto appendStandText = [&](StandCluster& cluster, const GrenadeSpot* spot)
+			{
+				const std::string line = makeStandText(spot);
+				if (line.empty())
+					return;
+				if (!cluster.textList.empty())
+					cluster.textList += "\n";
+				cluster.textList += line;
+			};
+
+			const float clusterRadius = std::clamp(settings.helperFocusRadius * 0.65f, 14.0f, 34.0f);
+			const float clusterRadiusSqr = clusterRadius * clusterRadius;
+			std::vector<StandCluster> clusters{};
+			clusters.reserve(standItems.size());
+
 			for (const auto& item : standItems)
 			{
+				int bestCluster = -1;
+				float bestDist = clusterRadiusSqr;
+				for (int i = 0; i < static_cast<int>(clusters.size()); ++i)
+				{
+					const float dist = item.standScreen.CalculateDistanceToPoint2DSqr(clusters[i].center);
+					if (dist <= bestDist)
+					{
+						bestDist = dist;
+						bestCluster = i;
+					}
+				}
+
+				if (bestCluster >= 0)
+				{
+					auto& cluster = clusters[bestCluster];
+					const int oldCount = cluster.count;
+					cluster.count += 1;
+					cluster.center.x = (cluster.center.x * oldCount + item.standScreen.x) / cluster.count;
+					cluster.center.y = (cluster.center.y * oldCount + item.standScreen.y) / cluster.count;
+					cluster.center.z = item.standScreen.z;
+					appendStandText(cluster, item.spot);
+					continue;
+				}
+
+				StandCluster cluster{};
+				cluster.center = item.standScreen;
+				cluster.count = 1;
+				appendStandText(cluster, item.spot);
+				clusters.push_back(std::move(cluster));
+			}
+
+			out.standItems.reserve(clusters.size());
+			for (const auto& cluster : clusters)
+			{
 				GrenadeStandRenderItem renderItem{};
-				renderItem.screen = item.standScreen;
-				renderItem.label = item.spot->name;
-				if (!item.spot->throwType.empty())
-					renderItem.label += " [" + LocalizeThrowType(item.spot->throwType) + "]";
+				renderItem.screen = cluster.center;
+				renderItem.label = cluster.textList;
 				out.standItems.push_back(std::move(renderItem));
 			}
 		}
@@ -2983,7 +3283,7 @@ namespace Cheats
 		shared.grenadeRevision.fetch_add(1, std::memory_order_release);
 	}
 
-	// 教学注释：返回 Configs 目录下全部 .json 配置名称（不含扩展名）。
+	// 注释：返回 Configs 目录下全部 .json 配置名称（不含扩展名）。
 	std::vector<std::string> Game::ListConfigs() const
 	{
 		std::vector<std::string> names{};
@@ -3006,8 +3306,8 @@ namespace Cheats
 		return names;
 	}
 
-	// 教学注释：将当前菜单中的关键开关与参数保存到 Configs/{name}.json。
-	// 这里刻意保存“用户配置层”而不是运行时缓存层，便于教学和后续扩展。
+	// 注释：将当前菜单中的关键开关与参数保存到 Configs/{name}.json。
+	// 这里刻意保存“用户配置层”而不是运行时缓存层，便于后续扩展。
 	bool Game::SaveConfig(const std::string& name, std::string& error) const
 	{
 		const std::string cfgName = NormalizeConfigName(name);
@@ -3120,7 +3420,7 @@ namespace Cheats
 		return true;
 	}
 
-	// 教学注释：从命名配置读取数据并回填菜单变量。
+	// 注释：从命名配置读取数据并回填菜单变量。
 	// 使用“字段存在才覆盖”的策略，保证旧版配置文件也能被兼容加载。
 	bool Game::LoadConfig(const std::string& name, std::string& error) const
 	{

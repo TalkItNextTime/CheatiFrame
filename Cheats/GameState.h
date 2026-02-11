@@ -50,10 +50,16 @@ namespace Cheats
 		std::uintptr_t entityList = 0;
 		std::uintptr_t plantedC4 = 0;
 		Vector plantedC4Pos{};
+		bool bombPlantedFlag = false;
 		bool bombTicking = false;
 		bool bombDefused = false;
 		bool bombBeingDefused = false;
 		int bombSite = -1;
+		float bombTimerLength = 0.0f;
+		float bombDefuseLength = 0.0f;
+		float bombTimeLeft = 0.0f;
+		float bombDefuseTimeLeft = 0.0f;
+		float bombDefuseProgress = 0.0f;
 		view_matrix_t matrix{};
 		RawPlayer local{};
 		std::array<RawPlayer, kMaxPlayers> players{};
@@ -96,9 +102,14 @@ namespace Cheats
 		bool showFov = false;
 		bool showCross = false;
 		bool bombVisible = false;
+		bool bombPlanted = false;
 		Vector bombScreen{};
 		int bombSite = -1;
 		bool bombBeingDefused = false;
+		float bombTimerLength = 0.0f;
+		float bombTimeLeft = 0.0f;
+		float bombDefuseTimeLeft = 0.0f;
+		float bombDefuseProgress = 0.0f;
 		std::array<EspPlayer, kMaxPlayers> players{};
 	};
 
@@ -215,7 +226,7 @@ namespace Cheats
 		GrenadeRenderState grenadeFront{};
 		GrenadeRenderState grenadeBack{};
 		SettingsSnapshot settings{};
-		std::shared_mutex rawMutex{};
+		mutable std::shared_mutex rawMutex{};
 		std::shared_mutex espMutex{};
 		std::shared_mutex aimMutex{};
 		mutable std::shared_mutex grenadeMutex{};

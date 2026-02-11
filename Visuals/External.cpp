@@ -10,7 +10,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
 		return true;
 
-	// 教学注释：当 ImGui 正在接管键盘输入（例如 List 页输入备注）时，
+	// 注释：当 ImGui 正在接管键盘输入（例如 List 页输入备注）时，
 	// 直接吞掉键盘消息，避免按 A/W/空格 等按键透传到游戏导致角色位移。
 	if (ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard)
 	{
@@ -148,7 +148,7 @@ bool Visual::External::InitImgui()
 
 	
 
-	// 教学注释：按你的要求，字体只从 exe 当前目录读取：./font.otf。
+	// 注释：字体只从 exe 当前目录读取：./font.otf。
 	// 这样部署时只需把字体和可执行文件放在同一目录即可。
 	std::filesystem::path customFontPath{};
 	const std::filesystem::path candidate = std::filesystem::current_path() / "font.otf";
