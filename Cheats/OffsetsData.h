@@ -11,6 +11,7 @@ namespace Cheats
 		std::uintptr_t dwLocalPlayerPawn{};
 		std::uintptr_t dwLocalPlayerController{};
 		std::uintptr_t dwGlobalVars{};
+		std::uintptr_t dwPlantedC4{};
 
 		std::uintptr_t attack{};
 		std::uintptr_t attack2{};
@@ -27,6 +28,11 @@ namespace Cheats
 		std::uintptr_t m_iShotsFired{};
 		std::uintptr_t m_aimPunchAngle{};
 		std::uintptr_t m_iIDEntIndex{};
+		std::uintptr_t m_bIsScoped{};
+		std::uintptr_t m_bBombTicking{};
+		std::uintptr_t m_bBombDefused{};
+		std::uintptr_t m_bBeingDefused{};
+		std::uintptr_t m_nBombSite{};
 		std::uintptr_t m_angEyeAngles{};
 		std::uintptr_t m_vecViewOffset{};
 		std::uintptr_t m_pClippingWeapon{};

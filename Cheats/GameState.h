@@ -1,8 +1,11 @@
 ﻿#pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <shared_mutex>
+#include <string>
+#include <vector>
 
 #include "../Math/Vector.h"
 
@@ -32,8 +35,10 @@ namespace Cheats
 		float pitch = 0.0f;
 		float yaw = 0.0f;
 		Vector viewOffset{};
+		bool isScoped = false;
 		int activeWeaponDefIndex = 0;
 		int activeWeaponSubclass = 0;
+		float dis2LPSqr = 0.0f;
 		float dis2LP = 0.0f;
 		std::array<Vector, kBoneCount> worldBones{};
 	};
@@ -43,6 +48,12 @@ namespace Cheats
 		bool hasLocal = false;
 		bool hasMatrix = false;
 		std::uintptr_t entityList = 0;
+		std::uintptr_t plantedC4 = 0;
+		Vector plantedC4Pos{};
+		bool bombTicking = false;
+		bool bombDefused = false;
+		bool bombBeingDefused = false;
+		int bombSite = -1;
 		view_matrix_t matrix{};
 		RawPlayer local{};
 		std::array<RawPlayer, kMaxPlayers> players{};
@@ -68,6 +79,7 @@ namespace Cheats
 		int team = 0;
 		bool spotted = false;
 		bool anyVisibleBone = false;
+		float dis2LPSqr = 0.0f;
 		float dis2LP = 0.0f;
 		float yaw = 0.0f;
 		std::array<Vector, kBoneCount> screenBones{};
@@ -83,6 +95,10 @@ namespace Cheats
 		float fovRadius = 0.0f;
 		bool showFov = false;
 		bool showCross = false;
+		bool bombVisible = false;
+		Vector bombScreen{};
+		int bombSite = -1;
+		bool bombBeingDefused = false;
 		std::array<EspPlayer, kMaxPlayers> players{};
 	};
 
@@ -90,6 +106,30 @@ namespace Cheats
 	{
 		Vector recoilPos{};
 		bool hasRecoil = false;
+	};
+
+	struct GrenadeStandRenderItem
+	{
+		Vector screen{};
+		std::string label{};
+	};
+
+	struct GrenadeAimRenderItem
+	{
+		Vector screen{};
+		std::string label{};
+		bool isTarget = false;
+		bool drawGuide = false;
+	};
+
+	struct GrenadeRenderState
+	{
+		bool valid = false;
+		int selectedSpotId = 0;
+		Vector cross{};
+		std::string topText{};
+		std::vector<GrenadeStandRenderItem> standItems{};
+		std::vector<GrenadeAimRenderItem> aimItems{};
 	};
 
 	struct SettingsSnapshot
@@ -105,6 +145,7 @@ namespace Cheats
 		bool visVisibleBones = true;
 		bool visHealth = true;
 		bool visDistance = false;
+		bool visBombEsp = true;
 		bool visCross = true;
 		std::array<float, 4> colorBones{ 1.0f, 1.0f, 1.0f, 1.0f };
 		std::array<float, 4> colorVisibleBones{ 0.2f, 1.0f, 0.2f, 1.0f };
@@ -121,13 +162,23 @@ namespace Cheats
 		int recoilY = 20;
 		int aimKey = 16;
 		int triggerKey = 6;
-		float mass = 18.0f;
-		float spring = 400.0f;
-		float damping = 260.0f;
-		float gravity = 10.0f;
+		int triggerIntervalMs = 95;
+		int aimFrequencyHz = 144;
+		int aimCurveMode = 0;
+		float aimCurveSpeed = 1.0f;
+		float aimCurveXSpeedScale = 1.0f;
+		float aimCurveYSpeedScale = 0.75f;
+		float aimCurveSmoothing = 0.55f;
+		float scopedFovScale = 1.25f;
 		int readSleepMs = 2;
 		int espSleepMs = 4;
 		int aimRetargetDelayMs = 120;
+		int inputMethodSelected = 0;
+		int inputMethodApplied = 0;
+		char inputEndpoint[64]{};
+		char inputUuid[64]{};
+		bool inputConnectRequest = false;
+		bool inputAutoConnect = true;
 		bool helperEnabled = false;
 		bool helperFilterByWeapon = true;
 		bool helperDrawStand = true;
@@ -161,10 +212,14 @@ namespace Cheats
 		RawState raw{};
 		EspState esp{};
 		AimState aim{};
+		GrenadeRenderState grenadeFront{};
+		GrenadeRenderState grenadeBack{};
 		SettingsSnapshot settings{};
 		std::shared_mutex rawMutex{};
 		std::shared_mutex espMutex{};
 		std::shared_mutex aimMutex{};
+		mutable std::shared_mutex grenadeMutex{};
 		mutable std::shared_mutex settingsMutex{};
+		std::atomic<std::uint64_t> grenadeRevision{ 0 };
 	};
 }

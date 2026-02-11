@@ -45,10 +45,16 @@
     <ClInclude Include="Cheats\Cheats.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Cheats\AimCurves.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="Visuals\Menu.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="Cheats\GameState.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Cheats\MouseController.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="Cheats\OffsetsData.h">
@@ -104,11 +110,23 @@
     <ClCompile Include="Cheats\Cheats.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="Cheats\AimCurves.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Cheats\MouseController.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="Visuals\Menu.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Math\Vector.h">
       <Filter>头文件</Filter>
+    </ClCompile>
+    <ClCompile Include="KmBox\kmboxNet.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="KmBox\my_enc.cpp">
+      <Filter>源文件</Filter>
     </ClCompile>
     <ClCompile Include="Cheats\AlgorAim.h">
       <Filter>源文件</Filter>

@@ -1,6 +1,8 @@
 ﻿#include "External.h"
 
 #include <filesystem>
+#include <chrono>
+#include <thread>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -111,7 +113,7 @@ bool Visual::External::CreateOvelayWindow()
 
 	wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"Cosmic", nullptr };
 	::RegisterClassExW(&wc);
-	overlaywindow.hwnd = ::CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW, wc.lpszClassName, L"Cosmic", WS_POPUP, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
+	overlaywindow.hwnd = ::CreateWindowExW(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW, wc.lpszClassName, L"Cosmic", WS_POPUP, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
 
 	// Initialize Direct3D
 	if (!CreateDeviceD3D(overlaywindow.hwnd))
@@ -188,7 +190,7 @@ void Visual::External::MessageLoop()
 
 		if (g_SwapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED)
 		{
-			::Sleep(10);
+			std::this_thread::sleep_for(std::chrono::microseconds(100));
 			continue;
 		}
 		g_SwapChainOccluded = false;
@@ -241,24 +243,39 @@ bool Visual::External::UpdateWindow()
 {
 	POINT Point{};
 	RECT Rect{};
+	static bool hasLastCaptureState = false;
+	static bool lastWantCaptureMouse = false;
 
-	//查找目标窗口
-	gamewindow.hwnd = FindWindowA((gamewindow.ClassName.empty() ? NULL : gamewindow.ClassName.c_str()),
-		(gamewindow.WindowName.empty() ? NULL : gamewindow.WindowName.c_str()));
-	if (gamewindow.hwnd == NULL)
-		return false;
+	//查找目标窗口（仅在句柄失效时重新查找，避免每帧系统查找）
+	if (!gamewindow.hwnd || !::IsWindow(gamewindow.hwnd))
+	{
+		gamewindow.hwnd = FindWindowA((gamewindow.ClassName.empty() ? NULL : gamewindow.ClassName.c_str()),
+			(gamewindow.WindowName.empty() ? NULL : gamewindow.WindowName.c_str()));
+		if (gamewindow.hwnd == NULL)
+			return false;
+	}
 
 	//获取目标窗口位置
 	GetClientRect(gamewindow.hwnd, &Rect);
 	ClientToScreen(gamewindow.hwnd, &Point);
 
-	//更新透明窗口位置和大小
-	overlaywindow.pos = gamewindow.pos = ImVec2((float)Point.x, (float)Point.y);
-	overlaywindow.size = gamewindow.size = ImVec2((float)Rect.right, (float)Rect.bottom);
-	if (!SetWindowPos(overlaywindow.hwnd,HWND_TOPMOST,(int)overlaywindow.pos.x,(int)overlaywindow.pos.y,(int)overlaywindow.size.x,(int)overlaywindow.size.y,SWP_SHOWWINDOW))
+	const ImVec2 newPos((float)Point.x, (float)Point.y);
+	const ImVec2 newSize((float)Rect.right, (float)Rect.bottom);
+	const bool windowChanged =
+		overlaywindow.pos.x != newPos.x || overlaywindow.pos.y != newPos.y ||
+		overlaywindow.size.x != newSize.x || overlaywindow.size.y != newSize.y;
+
+	//更新透明窗口位置和大小（仅在变化时提交系统调用）
+	overlaywindow.pos = gamewindow.pos = newPos;
+	overlaywindow.size = gamewindow.size = newSize;
+	if (windowChanged)
 	{
-		printf("窗口位置更新失败\r\n");
-		return false;
+		if (!SetWindowPos(overlaywindow.hwnd, HWND_TOPMOST, (int)overlaywindow.pos.x, (int)overlaywindow.pos.y,
+			(int)overlaywindow.size.x, (int)overlaywindow.size.y, SWP_SHOWWINDOW | SWP_NOACTIVATE))
+		{
+			printf("窗口位置更新失败\r\n");
+			return false;
+		}
 	}
 
 	//获取鼠标位置 同步到imgui中
@@ -268,19 +285,22 @@ bool Visual::External::UpdateWindow()
 	ImGui::GetIO().MousePos.x = (float)MousePos.x;
 	ImGui::GetIO().MousePos.y = (float)MousePos.y;
 
-	//鼠标穿透
-	if (ImGui::GetIO().WantCaptureMouse)
+	//鼠标穿透（仅在状态变化时切换，避免每帧 SetWindowLong）
+	const bool wantCaptureMouse = ImGui::GetIO().WantCaptureMouse;
+	if (!hasLastCaptureState || wantCaptureMouse != lastWantCaptureMouse)
 	{
-		//如果鼠标在imgui菜单中 就不设置成分层窗口
-		//printf("WantCaptureMouse=true\r\n");
-		SetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE, GetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE) & (~WS_EX_LAYERED));
-	}
-	else
-	{
-		//如果鼠标不在imgui菜单中 就设置成分层窗口
-		//printf("WantCaptureMouse=false\r\n");
-		SetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE, GetWindowLong(overlaywindow.hwnd, GWL_EXSTYLE) | WS_EX_LAYERED);
+		LONG_PTR style = GetWindowLongPtr(overlaywindow.hwnd, GWL_EXSTYLE);
+		if (wantCaptureMouse)
+			style &= ~(WS_EX_TRANSPARENT | WS_EX_LAYERED);
+		else
+			style |= (WS_EX_TRANSPARENT | WS_EX_LAYERED);
 
+		SetWindowLongPtr(overlaywindow.hwnd, GWL_EXSTYLE, style);
+		SetWindowPos(overlaywindow.hwnd, nullptr, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+		lastWantCaptureMouse = wantCaptureMouse;
+		hasLastCaptureState = true;
 	}
 
 

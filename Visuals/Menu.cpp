@@ -24,6 +24,28 @@ void Menu::ShowMenu()
 	ImGui::Begin("Cosmic");
 	ImGui::Text(u8"使用Insert键控制菜单显隐");
 	ImGui::Text(u8"帧数:%.2f     ", io.Framerate);
+	if (!Menu::输入提示.empty() && Menu::输入提示截止时间Ms > 0)
+	{
+		const std::uint64_t nowMs = static_cast<std::uint64_t>(GetTickCount64());
+		if (nowMs <= Menu::输入提示截止时间Ms)
+		{
+			const ImVec2 toastPos(20.0f, 120.0f);
+			ImGui::SetNextWindowPos(toastPos, ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(430.0f, 0.0f), ImGuiCond_Always);
+			ImGuiWindowFlags toastFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+				ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+				ImGuiWindowFlags_NoFocusOnAppearing;
+			ImGui::SetNextWindowBgAlpha(0.88f);
+			if (ImGui::Begin("##InputToast", nullptr, toastFlags))
+			{
+				ImGui::TextColored(Menu::输入提示警告 ? ImVec4(1.0f, 0.35f, 0.35f, 1.0f) : ImVec4(0.35f, 1.0f, 0.35f, 1.0f),
+					Menu::输入提示警告 ? "Input Warning" : "Input Info");
+				ImGui::Separator();
+				ImGui::TextWrapped("%s", Menu::输入提示.c_str());
+			}
+			ImGui::End();
+		}
+	}
 	ImGui::SameLine();
 	//ImGui::GetFrameCount();
 	//按钮
@@ -53,6 +75,7 @@ void Menu::ShowMenu()
 			ImGui::Checkbox(u8"绘制血量", &Menu::vis绘制血条);
 			//ImGui::Checkbox(u8"绘制连线", &Menu::DrawLine);
 			ImGui::Checkbox(u8"绘制距离", &Menu::vis绘制距离);
+			ImGui::Checkbox(u8"绘制C4", &Menu::vis绘制C4);
 			ImGui::Checkbox(u8"绘制骨骼", &Menu::vis绘制骨骼);
 			ImGui::Checkbox(u8"绘制可视骨骼点", &Menu::vis绘制可视骨骼点);
 
@@ -108,6 +131,9 @@ void Menu::ShowMenu()
 					isListeningForTriggerKey = false;
 				}
 			}
+			ImGui::SliderInt(u8"扳机间隔(ms)", &Menu::扳机间隔毫秒, 30, 400, "%d");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"控制每次扳机点击后的冷却间隔。\n防止一直连点。建议 70~140ms。\n");
 
 
 			ImGui::SliderInt(u8"后座补偿X", &Menu::recoil_X, 0, 100, "%d");
@@ -119,15 +145,36 @@ void Menu::ShowMenu()
 			ImGui::RadioButton(u8"胸部", &Menu::AimLocation, Menu::AimLoc::Chest);
 			//ImGui::Checkbox(u8"绘制目标连线", &Menu::DrawTarget);
 			ImGui::SliderFloat(u8"自瞄FOV", &Menu::aimbotFOV, 30.f, 800.f, "%.1f");
+			ImGui::SliderFloat(u8"开镜FOV倍率", &Menu::开镜FOV倍率, 1.00f, 2.50f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"仅对可开镜武器生效。开镜后自动放大自瞄FOV。\n例如基础FOV=130，倍率=1.3，则开镜FOV=169。\n");
 			ImGui::SliderInt(u8"瞄准距离", &Menu::aimbotDis, 0, 500, "%d");
+			ImGui::SliderInt(u8"瞄准频率(Hz)", &Menu::瞄准频率Hz, 90, 180, "%d");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"自瞄线程刷新频率（已收敛到稳定区间）。\n过高频率会放大微抖动，所以限制到 90~180。\n当前每帧目标耗时约 %.2f ms", 1000.0f / static_cast<float>(Menu::瞄准频率Hz > 0 ? Menu::瞄准频率Hz : 1));
 
-			ImGui::SliderFloat(u8"鼠标质量（越大越慢）", &Menu::MASS, 5.f, 100.f, "%.1f");
-			ImGui::SliderFloat(u8"弹簧刚度（越大越快）", &Menu::SPRING_CONSTANT, 0.f, 3000.f, "%.1f");
-			ImGui::SliderFloat(u8"阻尼（越大失速越快）", &Menu::DAMPING_CONSTANT, 0.f, 1000.f, "%.1f");
-			ImGui::SliderInt(u8"读线程休眠(ms)", &Menu::read线程休眠毫秒, 1, 20, "%d");
-			ImGui::SliderInt(u8"ESP线程休眠(ms)", &Menu::esp线程休眠毫秒, 1, 30, "%d");
+			ImGui::SeparatorText(u8"瞄准曲线");
+			static const char* curveModes[] = { u8"正弦弧线", u8"指数衰减", u8"S型平滑", u8"每次随机" };
+			ImGui::Combo(u8"曲线模式", &Menu::瞄准曲线模式, curveModes, IM_ARRAYSIZE(curveModes));
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"可在三种硬编码曲线中任选其一，或每次触发随机选择。\n不再使用贝塞尔与动态追赶控制点。\n");
+			ImGui::SliderFloat(u8"曲线速度", &Menu::曲线速度, 0.4f, 2.5f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"控制整体收敛速度。越大越快贴近目标。\n若有微抖动，建议先降低速度。\n");
+			ImGui::SliderFloat(u8"X轴速度比例", &Menu::曲线X速度比例, 0.20f, 2.00f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"仅影响水平移动速度。\n预期效果：提高后左右跟枪更快。\n");
+			ImGui::SliderFloat(u8"Y轴速度比例", &Menu::曲线Y速度比例, 0.20f, 2.00f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"仅影响垂直移动速度。\nY轴抖动明显时，优先下调该值（建议 0.55~0.85）。\n");
+			ImGui::TextDisabled(u8"曲线频率已移除以降低抖动");
+			ImGui::SliderFloat(u8"曲线平滑", &Menu::曲线平滑, 0.30f, 0.95f, "%.2f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"控制每帧输出平滑系数。越大越稳，越小越跟手。\n推荐 >=0.55 降低抖动。\n");
 			ImGui::SliderInt(u8"瞄准切换延时(ms)", &Menu::瞄准切换延时毫秒, 0, 1000, "%d");
-			//ImGui::SliderFloat(u8"引力", &Menu::GRAVITY_CONSTANT, 0.f, 20.f, "%.1f");
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip(u8"切换目标时附加的缓冲延时。\n预期效果：数值越大，目标切换更稳但反应慢；设为0时切换最迅速。\n建议区间：40~180ms。\n");
+			// 旧贝塞尔参数已废弃，当前使用固定数学曲线。
 
 
 
@@ -323,6 +370,40 @@ void Menu::ShowMenu()
 			}
 
 			ImGui::TextWrapped(u8"配置状态: %s", Menu::config状态.c_str());
+			ImGui::EndTabItem();
+		}
+
+		if (ImGui::BeginTabItem(u8"杂项"))
+		{
+			ImGui::SeparatorText(u8"Hardware & Performance");
+			static const char* inputMethods[] = { "WinAPI", "Kmbox Net", "Kmbox B+ Pro" };
+			ImGui::Combo("Input Method", &Menu::输入方式选择, inputMethods, IM_ARRAYSIZE(inputMethods));
+
+			const bool kmboxSelected = (Menu::输入方式选择 == Menu::InputMethod::KmboxNet || Menu::输入方式选择 == Menu::InputMethod::KmboxBPro);
+			if (kmboxSelected)
+			{
+				ImGui::Checkbox(u8"自动连接", &Menu::输入自动连接);
+				if (Menu::输入方式选择 == Menu::InputMethod::KmboxNet)
+					ImGui::InputText("IP:Port", Menu::输入地址, IM_ARRAYSIZE(Menu::输入地址));
+				else
+					ImGui::InputText("COM Port", Menu::输入地址, IM_ARRAYSIZE(Menu::输入地址));
+
+				if (Menu::输入方式选择 == Menu::InputMethod::KmboxNet)
+					ImGui::InputText("UUID", Menu::输入UUID, IM_ARRAYSIZE(Menu::输入UUID));
+
+				if (ImGui::Button(u8"Connect / Test"))
+					Menu::输入请求连接测试 = true;
+			}
+
+			const ImVec4 okColor = ImVec4(0.3f, 1.0f, 0.3f, 1.0f);
+			const ImVec4 failColor = ImVec4(1.0f, 0.35f, 0.35f, 1.0f);
+			ImGui::TextColored(Menu::输入连接成功 ? okColor : failColor, "Connection: %s", Menu::输入连接成功 ? "Connected" : "Disconnected");
+			ImGui::TextWrapped(u8"状态: %s", Menu::输入状态.c_str());
+			ImGui::TextWrapped(u8"扳机调试: %s", Menu::输入调试状态.c_str());
+
+			ImGui::SliderInt(u8"Thread Sleep (ms)", &Menu::read线程休眠毫秒, 1, 20, "%d");
+			ImGui::SliderInt(u8"ESP Update Rate (ms)", &Menu::esp线程休眠毫秒, 1, 30, "%d");
+
 			ImGui::EndTabItem();
 		}
 

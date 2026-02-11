@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <string>
+#include <cstdint>
 #include <vector>
 
 namespace Menu
@@ -19,6 +20,21 @@ namespace Menu
 
 	};
 
+	enum InputMethod
+	{
+		WinAPI = 0,
+		KmboxNet = 1,
+		KmboxBPro = 2
+	};
+
+	enum AimCurveType
+	{
+		SineArc = 0,
+		ExpoDecay = 1,
+		SmootherStep = 2,
+		RandomPerTrigger = 3
+	};
+
 
 
 	inline bool DisplayToggle = true; //菜单显示开关
@@ -35,6 +51,7 @@ namespace Menu
 	inline bool vis绘制可视骨骼点 = true;
 	inline bool vis绘制血条 = true;
 	inline bool vis绘制距离 = false;
+	inline bool vis绘制C4 = true;
 	inline bool vis绘制准心 = true;
 	inline float color骨骼[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	inline float color可视骨骼[4] = { 0.2f, 1.0f, 0.2f, 1.0f };
@@ -56,19 +73,35 @@ namespace Menu
 	//热键
 	inline int aimKey = 16;		//默认左Shift
 	inline int triggerKey = 6;	//默认上侧键
+	inline int 扳机间隔毫秒 = 95;
 	//inline char* aimHotKey[] = { u8"上侧键", u8"下侧键", u8"左Shift", u8"大小写锁"};
 	//inline int DefaultAimHotKey = 0;
 	//inline char* TriggleHotKey[] = { u8"上侧键", u8"下侧键", u8"左Shift", u8"大小写锁" };
 	//inline int DefaultTriggleHotKey = 3;
 
 	//算法
-	inline float MASS = 18.f;
-	inline float SPRING_CONSTANT = 400.0f;
-	inline float DAMPING_CONSTANT = 260.0f;
-	inline float GRAVITY_CONSTANT = 10.f;
+	inline int 瞄准频率Hz = 144;
+	inline int 瞄准曲线模式 = AimCurveType::SineArc;
+	inline float 曲线速度 = 1.0f;
+	inline float 曲线X速度比例 = 1.0f;
+	inline float 曲线Y速度比例 = 0.75f;
+	inline float 曲线平滑 = 0.55f;
+	inline float 开镜FOV倍率 = 1.25f;
 	inline int read线程休眠毫秒 = 2;
 	inline int esp线程休眠毫秒 = 4;
 	inline int 瞄准切换延时毫秒 = 120;
+	inline int 输入方式选择 = InputMethod::WinAPI;
+	inline int 输入方式当前生效 = InputMethod::WinAPI;
+	inline char 输入地址[64] = "127.0.0.1:6234";
+	inline char 输入UUID[64] = "";
+	inline bool 输入请求连接测试 = false;
+	inline bool 输入自动连接 = true;
+	inline bool 输入连接成功 = true;
+	inline std::string 输入状态 = u8"当前输入方式: WinAPI";
+	inline std::string 输入调试状态 = u8"触发调试: idle";
+	inline std::string 输入提示 = "";
+	inline bool 输入提示警告 = false;
+	inline std::uint64_t 输入提示截止时间Ms = 0;
 
 	inline bool helper启用 = false;
 	inline bool helper按武器筛选 = true;

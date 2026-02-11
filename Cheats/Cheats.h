@@ -10,13 +10,17 @@
 #include <atomic>
 #include <condition_variable>
 #include <array>
+#include <cstddef>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+#include <cstring>
 
 #include "GameState.h"
+#include "MouseController.h"
 #include "OffsetsData.h"
 #include "../Math/VisCheckCS2/VisCheckRuntime.h"
 
@@ -78,6 +82,7 @@ namespace Cheats
 			bool valid = false;
 			bool visible = false;
 			uint64_t timestampMs = 0;
+			uint32_t frameTag = 0;
 			Vector localEye{};
 			Vector worldBone{};
 		};
@@ -90,7 +95,8 @@ namespace Cheats
 		bool IsBoneVisibleCached(int playerIndex,
 			int boneIndex,
 			const Vector& localEye,
-			const Vector& worldBone) const;
+			const Vector& worldBone,
+			uint32_t frameTag = 0) const;
 		// 仅在自瞄FOV范围内做射线并返回首个可视骨骼索引，若都不可视返回 -1。
 		int GetFirstVisibleBoneIndex(const RawState& raw,
 			const RawPlayer& rp,
@@ -144,6 +150,10 @@ namespace Cheats
 		Vector ComputeFarAimPoint(const Vector& eyePos, float pitchDeg, float yawDeg, float distance) const;
 		// 处理菜单触发的“记录点位”请求。
 		void TryRecordGrenadeSpot(const RawState& raw, const SettingsSnapshot& settings);
+		// 将 UI 输入方式配置转换并尝试切换当前鼠标后端。
+		void HandleMouseInputRequests(const SettingsSnapshot& settings);
+		// 处理输入后端回滚等提示信息并同步到 UI。
+		void HandleMouseWarnings();
 		// 重载指定地图的点位缓存。
 		bool ReloadGrenadeMap(const std::string& mapName, std::string& error);
 		// 如地图变化则自动重载点位。
@@ -152,6 +162,10 @@ namespace Cheats
 		void HandleGrenadeListRequests(const RawState& raw, const SettingsSnapshot& settings);
 		// 响应菜单中的配置系统请求（刷新列表/保存/加载）。
 		void HandleConfigRequests(const SettingsSnapshot& settings);
+		// 生成 GrenadeHelper 可绘制前缓冲，渲染线程仅消费结果。
+		void BuildGrenadeRenderState(const RawState& raw, const SettingsSnapshot& settings, GrenadeRenderState& out) const;
+		// 将后缓冲原子发布到前缓冲。
+		void PublishGrenadeRenderState(GrenadeRenderState&& nextState);
 		// 枚举 Configs 目录中可用配置名。
 		std::vector<std::string> ListConfigs() const;
 		// 保存当前菜单设置到命名配置文件。
@@ -175,6 +189,59 @@ namespace Cheats
 			T buffer{};
 			ReadProcessMemory(gamehandle, reinterpret_cast<void*>(address), &buffer, sizeof(T), nullptr);
 			return buffer;
+		}
+
+		template <typename T>
+		bool ReadInto(uintptr_t address, T& out) const
+		{
+			if (!gamehandle || address == 0)
+				return false;
+			SIZE_T bytesRead = 0;
+			return ReadProcessMemory(gamehandle, reinterpret_cast<void*>(address), &out, sizeof(T), &bytesRead) != 0 && bytesRead == sizeof(T);
+		}
+
+		bool ReadBuffer(uintptr_t address, void* out, std::size_t size) const
+		{
+			if (!gamehandle || address == 0 || !out || size == 0)
+				return false;
+			SIZE_T bytesRead = 0;
+			return ReadProcessMemory(gamehandle, reinterpret_cast<void*>(address), out, size, &bytesRead) != 0 && bytesRead == size;
+		}
+
+		struct ReadPageCache
+		{
+			std::uintptr_t pageBase = 0;
+			std::array<std::byte, 0x1000> page{};
+			bool valid = false;
+		};
+
+		template <typename T>
+		bool ReadCached(std::uintptr_t address, T& out, ReadPageCache& cache) const
+		{
+			if (!gamehandle || address == 0)
+				return false;
+
+			constexpr std::uintptr_t kPageMask = ~static_cast<std::uintptr_t>(0xFFF);
+			const std::uintptr_t base = address & kPageMask;
+			const std::size_t offset = static_cast<std::size_t>(address - base);
+
+			if (offset + sizeof(T) > cache.page.size())
+				return ReadInto(address, out);
+
+			if (!cache.valid || cache.pageBase != base)
+			{
+				SIZE_T bytesRead = 0;
+				if (!ReadProcessMemory(gamehandle, reinterpret_cast<void*>(base), cache.page.data(), cache.page.size(), &bytesRead) || bytesRead != cache.page.size())
+				{
+					cache.valid = false;
+					return false;
+				}
+				cache.pageBase = base;
+				cache.valid = true;
+			}
+
+			std::memcpy(&out, cache.page.data() + offset, sizeof(T));
+			return true;
 		}
 
 		template <typename T>
@@ -212,6 +279,8 @@ namespace Cheats
 
 		GrenadeMapData grenadeData{};
 		std::string loadedGrenadeMap{};
+		std::string cachedMapName{};
+		std::uint64_t cachedMapNameAtMs = 0;
 		std::string grenadeStatus = u8"未加载点位";
 		std::uint64_t grenadeRevision = 0;
 
@@ -220,6 +289,7 @@ namespace Cheats
 		std::string initError{};
 
 		std::unique_ptr<VisCheckRuntime> visRuntime{};
+		MouseControllerService mouseController{};
 	};
 
 	inline Game gameName;

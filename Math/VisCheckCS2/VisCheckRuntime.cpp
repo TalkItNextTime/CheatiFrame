@@ -182,8 +182,9 @@ bool VisCheckRuntime::IsPointVisible(const Vector& src, const Vector& dst, float
     if (!visCheck_)
         return false;
 
-    const float worldDistance = src.CalcDis2Point3D(dst);
-    if (worldDistance > maxDistance)
+    const float maxDistanceSqr = maxDistance * maxDistance;
+    const float worldDistanceSqr = src.CalcDis2Point3DSqr(dst);
+    if (worldDistanceSqr > maxDistanceSqr)
         return false;
 
     return visCheck_->IsPointVisible(src, dst);

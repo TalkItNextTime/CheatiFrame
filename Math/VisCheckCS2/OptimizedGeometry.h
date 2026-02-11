@@ -1,17 +1,17 @@
-#pragma once
+п»ї#pragma once
 #include <string>
 #include <vector>
 #include "Math.hpp"
 
 class OptimizedGeometry {
 public:
-    // Каждый элемен??ме?(список треугольнико?
+    // Combined triangle meshes grouped by sub-mesh.
     std::vector<std::vector<TriangleCombined>> meshes;
 
-    // Загружае?оптимизированные данные из бинарног?файл?.opt
+    // Load pre-optimized geometry from a .opt file.
     bool LoadFromFile(const std::string& optimizedFile);
 
-    // Создаё?оптимизированный файл из сырого .vphys файл?
-    // извлек? нужные данные ?помощь?Parser, ?сохраняет результа??optimizedFile.
+    // Build optimized geometry from raw .vphys input and save to .opt.
+    // Callers are responsible for selecting input/output paths.
     bool CreateOptimizedFile(const std::string& rawFile, const std::string& optimizedFile);
 };

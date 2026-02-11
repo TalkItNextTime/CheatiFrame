@@ -132,7 +132,8 @@ namespace Cheats
 			!ReadUintField(offsetsRoot, "dwViewMatrix", out.dwViewMatrix, error) ||
 			!ReadUintField(offsetsRoot, "dwLocalPlayerPawn", out.dwLocalPlayerPawn, error) ||
 			!ReadUintField(offsetsRoot, "dwLocalPlayerController", out.dwLocalPlayerController, error) ||
-			!ReadUintField(offsetsRoot, "dwGlobalVars", out.dwGlobalVars, error))
+			!ReadUintField(offsetsRoot, "dwGlobalVars", out.dwGlobalVars, error) ||
+			!ReadUintField(offsetsRoot, "dwPlantedC4", out.dwPlantedC4, error))
 		{
 			error = "offsets.json read failed: " + error;
 			return false;
@@ -143,6 +144,7 @@ namespace Cheats
 		PrintLoadedOffset("offsets.json", "dwLocalPlayerPawn", out.dwLocalPlayerPawn);
 		PrintLoadedOffset("offsets.json", "dwLocalPlayerController", out.dwLocalPlayerController);
 		PrintLoadedOffset("offsets.json", "dwGlobalVars", out.dwGlobalVars);
+		PrintLoadedOffset("offsets.json", "dwPlantedC4", out.dwPlantedC4);
 
 		rapidjson::Document buttonsDoc;
 		if (!ParseJsonFile(buttonsPath, buttonsDoc, error))
@@ -199,6 +201,11 @@ namespace Cheats
 			{ "C_CSPlayerPawn", "m_iShotsFired", &out.m_iShotsFired },
 			{ "C_CSPlayerPawn", "m_aimPunchAngle", &out.m_aimPunchAngle },
 			{ "C_CSPlayerPawn", "m_iIDEntIndex", &out.m_iIDEntIndex },
+			{ "C_CSPlayerPawn", "m_bIsScoped", &out.m_bIsScoped },
+			{ "C_PlantedC4", "m_bBombTicking", &out.m_bBombTicking },
+			{ "C_PlantedC4", "m_bBombDefused", &out.m_bBombDefused },
+			{ "C_PlantedC4", "m_bBeingDefused", &out.m_bBeingDefused },
+			{ "C_PlantedC4", "m_nBombSite", &out.m_nBombSite },
 			{ "C_CSPlayerPawn", "m_angEyeAngles", &out.m_angEyeAngles },
 			{ "C_BaseModelEntity", "m_vecViewOffset", &out.m_vecViewOffset },
 			{ "C_CSPlayerPawn", "m_pClippingWeapon", &out.m_pClippingWeapon },

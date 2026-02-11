@@ -48,25 +48,50 @@ public:
 		return Vector{ x * factor, y * factor, z * factor };
 	}
 
+	//计算三维空间内点(x,y,z)距离坐标轴原点的平方距离
+	float CalcDis2Orign3DSqr() const
+	{
+		return x * x + y * y + z * z;
+	}
 	//计算三维空间内点(x,y,z)距离坐标轴原点的距离
 	float CalcDis2Orign3D() const
 	{
-		return sqrtf(powf(x, 2) + powf(y, 2) + powf(z, 2));
+		return sqrtf(CalcDis2Orign3DSqr());
+	}
+	//计算三维空间内点(x,y,z)距离另一个点的平方距离
+	float CalcDis2Point3DSqr(const Vector& pos) const
+	{
+		const float dx = pos.x - x;
+		const float dy = pos.y - y;
+		const float dz = pos.z - z;
+		return dx * dx + dy * dy + dz * dz;
 	}
 	//计算三维空间内点(x,y,z)距离另一个点的距离
 	float CalcDis2Point3D(const Vector& pos) const
 	{
-		return sqrtf(powf(pos.x - x, 2) + powf(pos.y - y, 2) + powf(pos.z - z, 2));
+		return sqrtf(CalcDis2Point3DSqr(pos));
+	}
+	//计算二维空间内点(x,y)距离坐标轴原点的平方距离
+	float CalculateDistance2DSqr() const
+	{
+		return x * x + y * y;
 	}
 	//计算二维空间内点(x,y)距离坐标轴原点的距离
 	float CalculateDistance2D() const
 	{
-		return sqrtf(powf(x, 2) + powf(y, 2));
+		return sqrtf(CalculateDistance2DSqr());
+	}
+	//计算二维空间内点(x,y)距离另一个点的平方距离
+	float CalculateDistanceToPoint2DSqr(const Vector& pos) const
+	{
+		const float dx = pos.x - x;
+		const float dy = pos.y - y;
+		return dx * dx + dy * dy;
 	}
 	//计算二维空间内点(x,y)距离另一个点的距离
 	float CalculateDistanceToPoint2D(const Vector& pos) const
 	{
-		return sqrtf(powf(pos.x - x, 2) + powf(pos.y - y, 2));
+		return sqrtf(CalculateDistanceToPoint2DSqr(pos));
 	}
 
 

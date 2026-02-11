@@ -1,6 +1,9 @@
 #include "kmboxNet.h"
 #include "HidTable.h"
 #include <time.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 #include "my_enc.h"
 #define monitor_ok    2
 #define monitor_exit  0

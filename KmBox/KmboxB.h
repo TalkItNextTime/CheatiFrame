@@ -7,6 +7,11 @@
 #pragma warning(disable: 4786)
 #pragma warning(disable: 4800)
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
+#include <algorithm>
 #include <cmath>
 #include <cassert>
 #include <windows.h>
@@ -209,7 +214,7 @@ public:
 
         unsigned long r_len = 0;
 
-        buf_len = min(buf_len - 1, (int)stat.cbInQue);
+        buf_len = (std::min)(buf_len - 1, static_cast<int>(stat.cbInQue));
         if (!ReadFile(_com_handle, buf, buf_len, &r_len, NULL))
             r_len = 0;
         buf[r_len] = '\0';
@@ -306,7 +311,7 @@ public:
 
         unsigned long r_len = 0;
 
-        buf_len = min((int)(buf_len - 1), (int)stat.cbInQue);
+        buf_len = (std::min)(static_cast<int>(buf_len - 1), static_cast<int>(stat.cbInQue));
 
         if (!ReadFile(_com_handle, buf, buf_len, &r_len, &_ro)) // In Windows 2000, ReadFile always returns True
         {

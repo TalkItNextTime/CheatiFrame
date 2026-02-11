@@ -20,18 +20,22 @@
 #include "../Visuals/Menu.h"
 #include "../Visuals/External.h"
 #include "OffsetsLoader.h"
-#include "AlgorAim.h"
+#include "AimCurves.h"
 
 constexpr float kPi = 3.14159265358979323846f;
 constexpr uint64_t kVisRayIntervalMs = 50;
+constexpr float kOneMeterUnits = 75.0f;
+constexpr float kUnitsPerMeterInv = 1.0f / kOneMeterUnits;
 
 namespace
 {
 	using Cheats::ScreenSize;
 	using Cheats::EspPlayer;
+	using Cheats::EspState;
 	using Cheats::GrenadeMapData;
 	using Cheats::GrenadeSpot;
 	using Cheats::kBoneCount;
+	using Cheats::InputBackend;
 
 	const std::filesystem::path kConfigDir("Configs");
 	const std::filesystem::path kLastLoadedConfigFile = kConfigDir / "last_loaded.txt";
@@ -50,6 +54,36 @@ namespace
 			--end;
 
 		return std::string(begin, end);
+	}
+
+	std::string NormalizeConfigName(const std::string& raw)
+	{
+		std::string name = TrimAsciiWhitespace(raw);
+		if (name.empty())
+			return {};
+
+		for (char ch : name)
+		{
+			if (static_cast<unsigned char>(ch) < 32)
+				return {};
+			switch (ch)
+			{
+			case '\\':
+			case '/':
+			case ':':
+			case '*':
+			case '?':
+			case '"':
+			case '<':
+			case '>':
+			case '|':
+				return {};
+			default:
+				break;
+			}
+		}
+
+		return name;
 	}
 
 	std::string ReadLastLoadedConfigName()
@@ -190,6 +224,22 @@ namespace
 		return -1;
 	}
 
+	bool IsScopeCapableWeapon(int weaponDefIndex)
+	{
+		switch (weaponDefIndex)
+		{
+		case 8:   // AUG
+		case 9:   // AWP
+		case 11:  // G3SG1
+		case 38:  // SCAR-20
+		case 39:  // SG553
+		case 40:  // SSG08
+			return true;
+		default:
+			return false;
+		}
+	}
+
 	bool ReadVectorField(const rapidjson::Value& obj, const char* key, Vector& out)
 	{
 		if (!obj.HasMember(key) || !obj[key].IsObject())
@@ -235,6 +285,15 @@ namespace
 	bool InScreen(const ScreenSize& screen, float x, float y)
 	{
 		return x >= 0.0f && y >= 0.0f && x <= screen.x && y <= screen.y;
+	}
+
+	Vector ClampToScreenEdge(const ScreenSize& screen, Vector point, float padding = 8.0f)
+	{
+		const float maxX = std::max(padding, screen.x - padding);
+		const float maxY = std::max(padding, screen.y - padding);
+		point.x = std::clamp(point.x, padding, maxX);
+		point.y = std::clamp(point.y, padding, maxY);
+		return point;
 	}
 
 	// 计算屏幕中心点（准星中心）坐标。
@@ -340,7 +399,7 @@ namespace
 			return;
 
 		char buff[64];
-		sprintf_s(buff, "%.f m", player.dis2LP / 75.0f);
+		sprintf_s(buff, "%.f m", player.dis2LP * kUnitsPerMeterInv);
 		const float textX = (player.esp1.x + player.esp2.x) / 2.05f;
 		const float textY = player.esp2.y;
 		if (InScreen(screen, textX, textY))
@@ -454,11 +513,64 @@ namespace
 		ImGui::GetBackgroundDrawList()->AddCircle({ center.x, center.y }, radius, ImColor(255, 255, 255), 18);
 	}
 
+	void DrawBombEsp(const EspState& esp)
+	{
+		if (!esp.bombVisible || esp.bombScreen.z <= 0.0f)
+			return;
+
+		const char* siteName = "?";
+		switch (esp.bombSite)
+		{
+		case 0:
+			siteName = "A";
+			break;
+		case 1:
+			siteName = "B";
+			break;
+		default:
+			siteName = "?";
+			break;
+		}
+
+		char buff[96]{};
+		sprintf_s(buff, "C4 [%s]%s", siteName, esp.bombBeingDefused ? " DEFUSING" : "");
+
+		const ImVec2 pos(esp.bombScreen.x + 8.0f, esp.bombScreen.y - 14.0f);
+		AddTextShadow(ImGui::GetBackgroundDrawList(), pos, ImColor(255, 120, 40), buff);
+		ImGui::GetBackgroundDrawList()->AddCircleFilled({ esp.bombScreen.x, esp.bombScreen.y }, 4.0f, ImColor(255, 120, 40));
+	}
+
 	// 线程等待器：等待功能启用或程序退出。
 	void WaitForEnable(std::atomic<bool>& enabled, std::condition_variable& cv, std::mutex& mutex, const std::atomic<bool>& running)
 	{
 		std::unique_lock lock(mutex);
 		cv.wait(lock, [&] { return !running.load() || enabled.load(); });
+	}
+
+	std::uint64_t GetNowMs()
+	{
+		using namespace std::chrono;
+		return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+	}
+
+	void PreciseSleepMs(const double milliseconds)
+	{
+		if (milliseconds <= 0.0)
+			return;
+
+		using namespace std::chrono;
+		auto start = high_resolution_clock::now();
+		const auto target = duration<double, std::milli>(milliseconds);
+
+		if (milliseconds > 1.5)
+		{
+			std::this_thread::sleep_for(duration<double, std::milli>(milliseconds - 0.8));
+		}
+
+		while (high_resolution_clock::now() - start < target)
+		{
+			std::this_thread::yield();
+		}
 	}
 }
 
@@ -575,7 +687,19 @@ namespace Cheats
 		}
 
 		// 教学注释：菜单里的“地图名”始终跟随当前实际地图，避免长期停留在默认 de_dust2。
-		std::string currentMap = NormalizeMapName(ReadCurrentMapName());
+		const std::uint64_t nowMs = GetNowMs();
+		std::string currentMap{};
+		if (!cachedMapName.empty() && (nowMs - cachedMapNameAtMs) < 1000)
+			currentMap = cachedMapName;
+		else
+		{
+			currentMap = NormalizeMapName(ReadCurrentMapName());
+			if (!currentMap.empty())
+			{
+				cachedMapName = currentMap;
+				cachedMapNameAtMs = nowMs;
+			}
+		}
 		if (!currentMap.empty())
 			strncpy_s(Menu::helper地图名, currentMap.c_str(), _TRUNCATE);
 		else
@@ -593,9 +717,14 @@ namespace Cheats
 			EnsureGrenadeMapLoaded(currentMap);
 
 		UpdateSettingsSnapshot();
+		HandleMouseWarnings();
+		SettingsSnapshot settings = SnapshotSettings();
+		const SettingsSnapshot requestSettings = settings;
+		HandleMouseInputRequests(settings);
+		UpdateSettingsSnapshot();
+		settings = SnapshotSettings();
 		UpdateThreadEnableFlags();
 
-		SettingsSnapshot settings = SnapshotSettings();
 		RawState raw{};
 		AimState aim{};
 
@@ -608,10 +737,10 @@ namespace Cheats
 			aim = shared.aim;
 		}
 
-		if (settings.helperRecordPending)
-			TryRecordGrenadeSpot(raw, settings);
+		if (requestSettings.helperRecordPending)
+			TryRecordGrenadeSpot(raw, requestSettings);
 
-		if (settings.helperSyncGrenadeTypePending && !settings.helperManualTypeOverride)
+		if (requestSettings.helperSyncGrenadeTypePending && !requestSettings.helperManualTypeOverride)
 		{
 			const std::string grenadeType = ReadCurrentGrenadeType(raw);
 			const int typeIndex = GrenadeTypeIndexByLabel(grenadeType);
@@ -626,9 +755,9 @@ namespace Cheats
 			}
 		}
 
-		HandleGrenadeListRequests(raw, settings);
+		HandleGrenadeListRequests(raw, requestSettings);
 
-		HandleConfigRequests(settings);
+		HandleConfigRequests(requestSettings);
 
 			{
 				std::shared_lock lock(shared.espMutex);
@@ -708,6 +837,7 @@ namespace Cheats
 		snapshot.visVisibleBones = Menu::vis绘制可视骨骼点;
 		snapshot.visHealth = Menu::vis绘制血条;
 		snapshot.visDistance = Menu::vis绘制距离;
+		snapshot.visBombEsp = Menu::vis绘制C4;
 		snapshot.visCross = Menu::vis绘制准心;
 		for (int i = 0; i < 4; ++i)
 		{
@@ -727,13 +857,24 @@ namespace Cheats
 		snapshot.recoilY = Menu::recoil_Y;
 		snapshot.aimKey = Menu::aimKey;
 		snapshot.triggerKey = Menu::triggerKey;
-		snapshot.mass = Menu::MASS;
-		snapshot.spring = Menu::SPRING_CONSTANT;
-		snapshot.damping = Menu::DAMPING_CONSTANT;
-		snapshot.gravity = Menu::GRAVITY_CONSTANT;
+		snapshot.triggerIntervalMs = std::clamp(Menu::扳机间隔毫秒, 30, 400);
+		snapshot.aimFrequencyHz = std::clamp(Menu::瞄准频率Hz, 90, 180);
+		snapshot.aimCurveMode = std::clamp(Menu::瞄准曲线模式, 0, 3);
+		snapshot.aimCurveSpeed = Menu::曲线速度;
+		snapshot.aimCurveXSpeedScale = std::clamp(Menu::曲线X速度比例, 0.20f, 2.00f);
+		snapshot.aimCurveYSpeedScale = std::clamp(Menu::曲线Y速度比例, 0.20f, 2.00f);
+		snapshot.aimCurveSmoothing = std::clamp(Menu::曲线平滑, 0.30f, 0.95f);
+		snapshot.scopedFovScale = std::clamp(Menu::开镜FOV倍率, 1.00f, 2.50f);
 		snapshot.readSleepMs = Menu::read线程休眠毫秒;
 		snapshot.espSleepMs = Menu::esp线程休眠毫秒;
 		snapshot.aimRetargetDelayMs = Menu::瞄准切换延时毫秒;
+		snapshot.inputMethodSelected = Menu::输入方式选择;
+		snapshot.inputMethodApplied = Menu::输入方式当前生效;
+		strncpy_s(snapshot.inputEndpoint, Menu::输入地址, _TRUNCATE);
+		strncpy_s(snapshot.inputUuid, Menu::输入UUID, _TRUNCATE);
+		snapshot.inputConnectRequest = Menu::输入请求连接测试;
+		snapshot.inputAutoConnect = Menu::输入自动连接;
+		Menu::输入请求连接测试 = false;
 		snapshot.helperEnabled = Menu::helper启用;
 		snapshot.helperFilterByWeapon = Menu::helper按武器筛选;
 		snapshot.helperDrawStand = Menu::helper绘制站位;
@@ -773,7 +914,14 @@ namespace Cheats
 			std::string error;
 			std::string mapName = NormalizeMapName(Menu::helper地图名);
 			if (mapName.empty())
-				mapName = ReadCurrentMapName();
+				mapName = cachedMapName;
+			if (mapName.empty())
+				mapName = NormalizeMapName(ReadCurrentMapName());
+			if (!mapName.empty())
+			{
+				cachedMapName = mapName;
+				cachedMapNameAtMs = GetNowMs();
+			}
 			if (mapName.empty())
 				mapName = "de_dust2";
 			if (ReloadGrenadeMap(mapName, error))
@@ -808,7 +956,7 @@ namespace Cheats
 		const SettingsSnapshot settings = SnapshotSettings();
 
 		const bool anyEspDraw = settings.utilDraw &&
-			(settings.visBox2D || settings.visBox3D || settings.visBones || settings.visHealth || settings.visDistance);
+			(settings.visBox2D || settings.visBox3D || settings.visBones || settings.visHealth || settings.visDistance || settings.visBombEsp);
 		const bool anyEspAux = settings.visCross || (settings.utilDraw && settings.aimDrawFov);
 		const bool espNeeded = anyEspDraw || anyEspAux || settings.aimEnabled || settings.helperEnabled;
 		const bool aimNeeded = settings.aimEnabled || settings.aimTrigger || settings.aimRecoil;
@@ -820,6 +968,77 @@ namespace Cheats
 			espCv.notify_all();
 		if (aimEnabled.exchange(aimNeeded) != aimNeeded)
 			aimCv.notify_all();
+	}
+
+	void Game::HandleMouseWarnings()
+	{
+		std::string warning = mouseController.ConsumeWarning();
+		if (warning.empty())
+			return;
+
+		Menu::输入方式当前生效 = static_cast<int>(mouseController.ActiveBackend());
+		Menu::输入连接成功 = false;
+		Menu::输入状态 = warning;
+		Menu::输入调试状态 = std::string(u8"运行时输入警告: ") + warning;
+		Menu::输入提示 = warning;
+		Menu::输入提示警告 = true;
+		Menu::输入提示截止时间Ms = GetNowMs() + 4000;
+	}
+
+	void Game::HandleMouseInputRequests(const SettingsSnapshot& settings)
+	{
+		const bool manualConnectRequested = settings.inputConnectRequest;
+		const bool shouldAutoConnect = settings.inputAutoConnect &&
+			settings.inputMethodSelected != static_cast<int>(InputBackend::WinAPI) &&
+			settings.inputMethodSelected != settings.inputMethodApplied;
+
+		if (!manualConnectRequested && !shouldAutoConnect)
+			return;
+
+		MouseConnectParams params{};
+		if (settings.inputMethodSelected == static_cast<int>(InputBackend::KmboxNet))
+			params.backend = InputBackend::KmboxNet;
+		else if (settings.inputMethodSelected == static_cast<int>(InputBackend::KmboxBPro))
+			params.backend = InputBackend::KmboxBPro;
+		else
+			params.backend = InputBackend::WinAPI;
+
+		if (params.backend != InputBackend::WinAPI && !manualConnectRequested && !shouldAutoConnect)
+			return;
+
+		params.endpoint = settings.inputEndpoint;
+		params.uuid = settings.inputUuid;
+
+		std::string message{};
+		if (mouseController.Connect(params, message))
+		{
+			Menu::输入方式当前生效 = static_cast<int>(params.backend);
+			Menu::输入方式选择 = static_cast<int>(params.backend);
+			Menu::输入连接成功 = true;
+			Menu::输入状态 = message;
+			std::string triggerDebug{};
+			if (mouseController.TriggerClickDebug(triggerDebug))
+				Menu::输入调试状态 = std::string(u8"连接后扳机测试成功: ") + triggerDebug;
+			else
+				Menu::输入调试状态 = std::string(u8"连接后扳机测试失败: ") + triggerDebug;
+			Menu::输入提示 = message;
+			Menu::输入提示警告 = false;
+			Menu::输入提示截止时间Ms = GetNowMs() + 2500;
+			return;
+		}
+
+		Menu::输入方式当前生效 = static_cast<int>(mouseController.ActiveBackend());
+		Menu::输入连接成功 = false;
+		Menu::输入状态 = std::string(u8"输入连接失败: ") + message;
+		Menu::输入调试状态 = std::string(u8"连接阶段失败，未执行扳机测试: ") + message;
+		Menu::输入提示 = Menu::输入状态;
+		Menu::输入提示警告 = true;
+		Menu::输入提示截止时间Ms = GetNowMs() + 5000;
+
+		if (shouldAutoConnect)
+		{
+			Menu::输入提示 = std::string(u8"自动连接失败，请检查参数后点击 Connect / Test: ") + message;
+		}
 	}
 
 	// 通过ToolHelp遍历模块，返回指定模块基址。
@@ -848,6 +1067,19 @@ namespace Cheats
 	void Game::ReadWorker()
 	{
 		const int* boneIds = reinterpret_cast<const int*>(&boneindex);
+		constexpr std::size_t kBoneStride = 32;
+		constexpr std::size_t kBoneBatchCount = 32;
+		constexpr std::size_t kBoneBatchBytes = kBoneStride * kBoneBatchCount;
+
+		auto readPtrCached = [&](std::uintptr_t address, std::uintptr_t& out, ReadPageCache& cache) -> bool
+		{
+			return ReadCached(address, out, cache);
+		};
+
+		auto readPtrDirect = [&](std::uintptr_t address, std::uintptr_t& out) -> bool
+		{
+			return ReadInto(address, out);
+		};
 
 		while (running.load())
 		{
@@ -859,82 +1091,184 @@ namespace Cheats
 			SettingsSnapshot settings = SnapshotSettings();
 			const int readSleepMs = std::clamp(settings.readSleepMs, 1, 20);
 
+			ReadPageCache localCache{};
+			ReadPageCache entityListPageCache{};
+ 
+			auto safeReadCached = [&](std::uintptr_t address, auto& out, ReadPageCache& cache) {
+				if (!ReadCached(address, out, cache))
+					out = {};
+			};
+
+			auto safeReadInto = [&](std::uintptr_t address, auto& out) {
+				if (!ReadInto(address, out))
+					out = {};
+			};
+
+			auto safeReadBuffer = [&](std::uintptr_t address, void* out, std::size_t size) -> bool {
+				if (!ReadBuffer(address, out, size))
+				{
+					if (out && size > 0)
+						std::memset(out, 0, size);
+					return false;
+				}
+				return true;
+			};
+
 			RawState newRaw{};
-			newRaw.entityList = Read<uintptr_t>(client + offsets.dwEntityList);
+			if (!ReadInto(client + offsets.dwEntityList, newRaw.entityList))
+				newRaw.entityList = 0;
+			if (!ReadInto(client + offsets.dwPlantedC4, newRaw.plantedC4))
+				newRaw.plantedC4 = 0;
+			if (newRaw.plantedC4)
+			{
+				if (offsets.m_bBombTicking)
+					safeReadCached(newRaw.plantedC4 + offsets.m_bBombTicking, newRaw.bombTicking, localCache);
+				if (offsets.m_bBombDefused)
+					safeReadCached(newRaw.plantedC4 + offsets.m_bBombDefused, newRaw.bombDefused, localCache);
+				if (offsets.m_bBeingDefused)
+					safeReadCached(newRaw.plantedC4 + offsets.m_bBeingDefused, newRaw.bombBeingDefused, localCache);
+
+				if (offsets.m_nBombSite)
+				{
+					if (!ReadCached(newRaw.plantedC4 + offsets.m_nBombSite, newRaw.bombSite, localCache))
+						newRaw.bombSite = -1;
+				}
+				else
+				{
+					newRaw.bombSite = -1;
+				}
+
+				safeReadCached(newRaw.plantedC4 + offsets.m_vOldOrigin, newRaw.plantedC4Pos, localCache);
+				if (offsets.m_vecAbsOrigin)
+				{
+					std::uintptr_t c4SceneNode = 0;
+					safeReadCached(newRaw.plantedC4 + offsets.m_pGameSceneNode, c4SceneNode, localCache);
+					if (c4SceneNode)
+					{
+						Vector absOrigin{};
+						safeReadInto(c4SceneNode + offsets.m_vecAbsOrigin, absOrigin);
+						if (!absOrigin.IsZero())
+							newRaw.plantedC4Pos = absOrigin;
+					}
+				}
+			}
+			else
+			{
+				newRaw.bombTicking = false;
+				newRaw.bombDefused = false;
+				newRaw.bombBeingDefused = false;
+				newRaw.bombSite = -1;
+				newRaw.plantedC4Pos = {};
+			}
 			if (!newRaw.entityList)
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(readSleepMs));
 				continue;
 			}
 
-			newRaw.matrix = Read<view_matrix_t>(client + offsets.dwViewMatrix);
+			safeReadInto(client + offsets.dwViewMatrix, newRaw.matrix);
 			newRaw.hasMatrix = newRaw.matrix[0][0] != 0.0f;
 
-			std::uintptr_t localAddr = Read<uintptr_t>(client + offsets.dwLocalPlayerPawn);
-			if (!localAddr)
-			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(readSleepMs));
-				continue;
-			}
+		std::uintptr_t localAddr = 0;
+		safeReadInto(client + offsets.dwLocalPlayerPawn, localAddr);
+		if (!localAddr)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(readSleepMs));
+			continue;
+		}
+
+		localCache = {};
+		ReadPageCache localHandleCache{};
 
 				newRaw.local.valid = true;
 				newRaw.local.pAddr = localAddr;
-				newRaw.local.origin = Read<Vector>(localAddr + offsets.m_vOldOrigin);
+				safeReadCached(localAddr + offsets.m_vOldOrigin, newRaw.local.origin, localCache);
 				if (offsets.m_vecAbsOrigin)
 				{
-					const std::uintptr_t localSceneNode = Read<std::uintptr_t>(localAddr + offsets.m_pGameSceneNode);
+					std::uintptr_t localSceneNode = 0;
+					safeReadCached(localAddr + offsets.m_pGameSceneNode, localSceneNode, localCache);
 					if (localSceneNode)
 					{
-						const Vector localAbsOrigin = Read<Vector>(localSceneNode + offsets.m_vecAbsOrigin);
+						Vector localAbsOrigin{};
+						safeReadInto(localSceneNode + offsets.m_vecAbsOrigin, localAbsOrigin);
 						if (!localAbsOrigin.IsZero())
 							newRaw.local.origin = localAbsOrigin;
 					}
 				}
-				newRaw.local.viewOffset = Read<Vector>(localAddr + offsets.m_vecViewOffset);
+				safeReadCached(localAddr + offsets.m_vecViewOffset, newRaw.local.viewOffset, localCache);
 			{
-				Vector localEyeAngles = Read<Vector>(localAddr + offsets.m_angEyeAngles);
+				Vector localEyeAngles{};
+				safeReadCached(localAddr + offsets.m_angEyeAngles, localEyeAngles, localCache);
 				newRaw.local.pitch = localEyeAngles.x;
 				newRaw.local.yaw = localEyeAngles.y;
 			}
-			newRaw.local.team = Read<int>(localAddr + offsets.m_iTeamNum);
+			safeReadCached(localAddr + offsets.m_iTeamNum, newRaw.local.team, localCache);
+			if (offsets.m_bIsScoped)
+				safeReadCached(localAddr + offsets.m_bIsScoped, newRaw.local.isScoped, localCache);
+			else
+				newRaw.local.isScoped = false;
 
-			const std::uintptr_t clippingWeapon = Read<std::uintptr_t>(localAddr + offsets.m_pClippingWeapon);
+		std::uintptr_t clippingWeapon = 0;
+		safeReadCached(localAddr + offsets.m_pClippingWeapon, clippingWeapon, localHandleCache);
 			if (clippingWeapon)
 			{
-				newRaw.local.activeWeaponSubclass = Read<int>(clippingWeapon + offsets.m_nSubclassID);
+				safeReadInto(clippingWeapon + offsets.m_nSubclassID, newRaw.local.activeWeaponSubclass);
 				const std::uintptr_t attributeManager = clippingWeapon + offsets.m_AttributeManager;
 				const std::uintptr_t itemView = attributeManager + offsets.m_Item;
-				newRaw.local.activeWeaponDefIndex = Read<std::uint16_t>(itemView + offsets.m_iItemDefinitionIndex);
+				std::uint16_t defIndex = 0;
+				safeReadInto(itemView + offsets.m_iItemDefinitionIndex, defIndex);
+				newRaw.local.activeWeaponDefIndex = defIndex;
 			}
 
-			newRaw.crosshairEnt = Read<int>(localAddr + offsets.m_iIDEntIndex);
-			newRaw.shotsFired = Read<int>(localAddr + offsets.m_iShotsFired);
-			newRaw.aimPunch = Read<Vector>(localAddr + offsets.m_aimPunchAngle);
+			safeReadCached(localAddr + offsets.m_iIDEntIndex, newRaw.crosshairEnt, localCache);
+			safeReadCached(localAddr + offsets.m_iShotsFired, newRaw.shotsFired, localCache);
+			safeReadCached(localAddr + offsets.m_aimPunchAngle, newRaw.aimPunch, localCache);
 
-				const bool needBones = settings.aimEnabled || (settings.utilDraw && (settings.visBones || settings.visVisibleBones));
+			const bool needAllBones =
+				(settings.utilDraw && (settings.visBones || settings.visVisibleBones)) ||
+				(settings.aimEnabled && settings.utilVpkVisibilityParse);
+			const bool needAimBoneOnly = settings.aimEnabled && !needAllBones;
+			const int aimBoneIndex = std::clamp(settings.aimLocation, 0, static_cast<int>(kBoneCount) - 1);
+			const bool needHeadBone = settings.utilDraw &&
+				(settings.visBox2D || settings.visBox3D || settings.visHealth || settings.visDistance || settings.visBones || settings.visVisibleBones);
+			const bool needBones = needAllBones || needAimBoneOnly || needHeadBone;
+			const bool needPlayerSceneNode = (offsets.m_vecAbsOrigin != 0) || needBones;
 			const bool needYaw = settings.utilDraw && settings.visBox3D;
 
-			for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
-			{
+		ReadPageCache controllerHandleCache{};
+		for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
+		{
 				RawPlayer player{};
 
-				std::uintptr_t listEntry1 = Read<uintptr_t>(newRaw.entityList + (8ull * (index & 0x7FFF) >> 9) + 16);
+				const std::uintptr_t listEntry1Address = newRaw.entityList + (8ull * (index & 0x7FFF) >> 9) + 16;
+				std::uintptr_t listEntry1 = 0;
+				if (!readPtrCached(listEntry1Address, listEntry1, entityListPageCache))
+					continue;
 				if (!listEntry1)
 					continue;
 
-				std::uintptr_t playerController = Read<uintptr_t>(listEntry1 + 112ull * (index & 0x1FF));
+				std::uintptr_t playerController = 0;
+				if (!readPtrDirect(listEntry1 + 112ull * (index & 0x1FF), playerController))
+					continue;
 				if (!playerController)
 					continue;
 
-				uint32_t playerPawn = Read<uint32_t>(playerController + offsets.m_hPlayerPawn);
+			std::uint32_t playerPawn = 0;
+			if (!ReadCached(playerController + offsets.m_hPlayerPawn, playerPawn, controllerHandleCache))
+				continue;
 				if (!playerPawn)
 					continue;
 
-				std::uintptr_t listEntry2 = Read<uintptr_t>(newRaw.entityList + 0x8ull * ((playerPawn & 0x7FFF) >> 9) + 16);
+				const std::uintptr_t listEntry2Address = newRaw.entityList + 0x8ull * ((playerPawn & 0x7FFF) >> 9) + 16;
+				std::uintptr_t listEntry2 = 0;
+				if (!readPtrCached(listEntry2Address, listEntry2, entityListPageCache))
+					continue;
 				if (!listEntry2)
 					continue;
 
-				std::uintptr_t pawnPtr = Read<uintptr_t>(listEntry2 + 112ull * (playerPawn & 0x1FF));
+				std::uintptr_t pawnPtr = 0;
+				if (!readPtrDirect(listEntry2 + 112ull * (playerPawn & 0x1FF), pawnPtr))
+					continue;
 				if (!pawnPtr)
 					continue;
 
@@ -942,24 +1276,27 @@ namespace Cheats
 					continue;
 
 			player.pAddr = pawnPtr;
-			player.sceneNode = Read<uintptr_t>(player.pAddr + offsets.m_pGameSceneNode);
-			player.team = Read<int>(player.pAddr + offsets.m_iTeamNum);
+			ReadPageCache playerCache{};
+			if (needPlayerSceneNode)
+				safeReadCached(player.pAddr + offsets.m_pGameSceneNode, player.sceneNode, playerCache);
+			safeReadCached(player.pAddr + offsets.m_iTeamNum, player.team, playerCache);
 			if (settings.utilTeamCheck && player.team == newRaw.local.team)
 				continue;
-			player.lifeState = Read<int>(player.pAddr + offsets.m_lifeState);
+			safeReadCached(player.pAddr + offsets.m_lifeState, player.lifeState, playerCache);
 				if (player.lifeState != 256)
 					continue;
 
 				if (settings.utilVisibleCheck && !settings.utilVpkVisibilityParse)
-					player.spotted = Read<bool>(player.pAddr + offsets.m_entitySpottedState + 0x08);
+					safeReadCached(player.pAddr + offsets.m_entitySpottedState + 0x08, player.spotted, playerCache);
 				else
 					player.spotted = true;
 
-				player.health = Read<int>(player.pAddr + offsets.m_iHealth);
-				player.origin = Read<Vector>(player.pAddr + offsets.m_vOldOrigin);
+				safeReadCached(player.pAddr + offsets.m_iHealth, player.health, playerCache);
+				safeReadCached(player.pAddr + offsets.m_vOldOrigin, player.origin, playerCache);
 				if (offsets.m_vecAbsOrigin && player.sceneNode)
 				{
-					const Vector absOrigin = Read<Vector>(player.sceneNode + offsets.m_vecAbsOrigin);
+					Vector absOrigin{};
+					safeReadInto(player.sceneNode + offsets.m_vecAbsOrigin, absOrigin);
 					if (!absOrigin.IsZero())
 						player.origin = absOrigin;
 				}
@@ -970,25 +1307,54 @@ namespace Cheats
 				// 这里改为按需实时读取，消除同频闪烁与一卡一卡的问题。
 				if (needYaw)
 				{
-					Vector ang = Read<Vector>(player.pAddr + offsets.m_angEyeAngles);
+					Vector ang{};
+					safeReadCached(player.pAddr + offsets.m_angEyeAngles, ang, playerCache);
 					player.pitch = ang.x;
 					player.yaw = ang.y;
 				}
 
-				player.dis2LP = newRaw.local.origin.CalcDis2Point3D(player.origin);
+				player.dis2LPSqr = newRaw.local.origin.CalcDis2Point3DSqr(player.origin);
+				player.dis2LP = std::sqrt(player.dis2LPSqr);
 
 				if (needBones)
 				{
 					if (player.sceneNode)
 					{
-						player.boneArr = Read<uintptr_t>(player.sceneNode + offsets.m_modelState + 0x80);
+						safeReadInto(player.sceneNode + offsets.m_modelState + 0x80, player.boneArr);
 						if (player.boneArr)
 						{
-							player.head = Read<Vector>(player.boneArr + static_cast<std::uintptr_t>(boneindex.head) * 32);
-							for (size_t i = 0; i < kBoneCount; ++i)
+							if (needAllBones)
 							{
-								const int boneId = boneIds[i];
-								player.worldBones[i] = Read<Vector>(player.boneArr + static_cast<std::uintptr_t>(boneId) * 32);
+								std::array<std::byte, kBoneBatchBytes> boneBatch{};
+								if (safeReadBuffer(player.boneArr, boneBatch.data(), boneBatch.size()))
+								{
+									for (size_t i = 0; i < kBoneCount; ++i)
+									{
+										const int boneId = boneIds[i];
+										if (boneId < 0 || static_cast<std::size_t>(boneId) >= kBoneBatchCount)
+											continue;
+										Vector bone{};
+										std::memcpy(&bone, boneBatch.data() + static_cast<std::size_t>(boneId) * kBoneStride, sizeof(Vector));
+										player.worldBones[i] = bone;
+									}
+									if (boneindex.head >= 0 && static_cast<std::size_t>(boneindex.head) < kBoneBatchCount)
+									{
+										std::memcpy(&player.head,
+											boneBatch.data() + static_cast<std::size_t>(boneindex.head) * kBoneStride,
+											sizeof(Vector));
+									}
+								}
+							}
+							else
+							{
+								if (needHeadBone)
+									safeReadInto(player.boneArr + static_cast<std::uintptr_t>(boneindex.head) * kBoneStride, player.head);
+
+								if (needAimBoneOnly)
+								{
+									const int aimBoneId = boneIds[aimBoneIndex];
+									safeReadInto(player.boneArr + static_cast<std::uintptr_t>(aimBoneId) * kBoneStride, player.worldBones[aimBoneIndex]);
+								}
 							}
 						}
 					}
@@ -1037,9 +1403,13 @@ namespace Cheats
 			}
 
 			newEsp.cross = GetCross(settings.screen);
-			newEsp.fovRadius = settings.aimbotFOV;
+			const bool scopedFovBoost = raw.local.isScoped && IsScopeCapableWeapon(raw.local.activeWeaponDefIndex);
+			const float scopedScale = std::clamp(settings.scopedFovScale, 1.0f, 2.5f);
+			newEsp.fovRadius = settings.aimbotFOV * (scopedFovBoost ? scopedScale : 1.0f);
+			const float fovRadiusSqr = newEsp.fovRadius * newEsp.fovRadius;
 			newEsp.showFov = settings.utilDraw && settings.aimDrawFov;
 			newEsp.showCross = settings.visCross;
+			newEsp.bombVisible = false;
 
 			const bool needBoxes = settings.utilDraw && (settings.visBox2D || settings.visBox3D || settings.visHealth || settings.visDistance);
 			const bool needVpkAimBones =
@@ -1051,6 +1421,18 @@ namespace Cheats
 
 			if (raw.hasMatrix)
 			{
+				if (settings.utilDraw && settings.visBombEsp && raw.plantedC4 && raw.bombTicking && !raw.bombDefused)
+				{
+					Vector bombScreen{};
+					if (WorldToScreen(raw.plantedC4Pos, raw.matrix, settings.screen, bombScreen))
+					{
+						newEsp.bombVisible = true;
+						newEsp.bombScreen = bombScreen;
+						newEsp.bombSite = raw.bombSite;
+						newEsp.bombBeingDefused = raw.bombBeingDefused;
+					}
+				}
+
 				int projectedCount = 0;
 				for (int index = 0; index < static_cast<int>(kMaxPlayers); ++index)
 				{
@@ -1067,6 +1449,7 @@ namespace Cheats
 					ep.health = rp.health;
 					ep.team = rp.team;
 					ep.spotted = rp.spotted;
+					ep.dis2LPSqr = rp.dis2LPSqr;
 					ep.dis2LP = rp.dis2LP;
 					ep.yaw = rp.yaw;
 
@@ -1119,13 +1502,14 @@ namespace Cheats
 									if (screenBone.z <= 0.0f || !InScreen(settings.screen, screenBone.x, screenBone.y))
 										continue;
 
-									const float distToCross = screenBone.CalculateDistanceToPoint2D(newEsp.cross);
-									nearestBoneDist = (std::min)(nearestBoneDist, distToCross);
+									const float distToCrossSqr = screenBone.CalculateDistanceToPoint2DSqr(newEsp.cross);
+									nearestBoneDist = (std::min)(nearestBoneDist, distToCrossSqr);
 								}
 
-								if (nearestBoneDist < settings.aimbotFOV)
+								if (nearestBoneDist < fovRadiusSqr)
 								{
 									const Vector localEye = raw.local.origin + raw.local.viewOffset;
+									const uint32_t visFrameTag = static_cast<uint32_t>(GetTickCount64() / kVisRayIntervalMs);
 									for (size_t i = 0; i < kBoneCount; ++i)
 									{
 										const Vector& worldBone = rp.worldBones[i];
@@ -1136,11 +1520,11 @@ namespace Cheats
 										if (screenBone.z <= 0.0f || !InScreen(settings.screen, screenBone.x, screenBone.y))
 											continue;
 
-										const float distToCross = screenBone.CalculateDistanceToPoint2D(newEsp.cross);
-										if (distToCross >= settings.aimbotFOV)
+										const float distToCrossSqr = screenBone.CalculateDistanceToPoint2DSqr(newEsp.cross);
+										if (distToCrossSqr >= fovRadiusSqr)
 											continue;
 
-										ep.visibleBones[i] = IsBoneVisibleCached(index, static_cast<int>(i), localEye, worldBone);
+										ep.visibleBones[i] = IsBoneVisibleCached(index, static_cast<int>(i), localEye, worldBone, visFrameTag);
 										if (ep.visibleBones[i])
 											ep.anyVisibleBone = true;
 									}
@@ -1193,6 +1577,17 @@ namespace Cheats
 				shared.esp = newEsp;
 			}
 
+			if (settings.helperEnabled)
+			{
+				GrenadeRenderState grenadeState{};
+				BuildGrenadeRenderState(raw, settings, grenadeState);
+				PublishGrenadeRenderState(std::move(grenadeState));
+			}
+			else
+			{
+				PublishGrenadeRenderState(GrenadeRenderState{});
+			}
+
 			const int adaptiveEspSleepMs = (settings.visBones || settings.visBox3D)
 				? std::max(1, espSleepMs - 1)
 				: espSleepMs;
@@ -1203,11 +1598,18 @@ namespace Cheats
 	// 自瞄线程：执行目标筛选、平滑移动与扳机逻辑。
 	void Game::AimWorker()
 	{
-		bool triggerHolding = false;
+		bool triggerPulseDown = false;
 		int lastBestIndex = -1;
+		AimCurveTracker curveTracker{};
+		auto triggerPulseReleaseAt = std::chrono::steady_clock::now();
+		auto nextTriggerAllowedAt = std::chrono::steady_clock::now();
+		auto lastTriggerDebugTick = std::chrono::steady_clock::time_point{};
+		float carryX = 0.0f;
+		float carryY = 0.0f;
 
 		while (running.load())
 		{
+			auto loopStart = std::chrono::high_resolution_clock::now();
 			WaitForEnable(aimEnabled, aimCv, aimMutex, running);
 			if (!running.load())
 				break;
@@ -1247,6 +1649,64 @@ namespace Cheats
 			if (!settings.displayToggle)
 			{
 				bool triggerShouldHold = false;
+				bool movedThisFrame = false;
+				const bool scopedFovBoost = raw.local.isScoped && IsScopeCapableWeapon(raw.local.activeWeaponDefIndex);
+				const float scopedScale = std::clamp(settings.scopedFovScale, 1.0f, 2.5f);
+				const float effectiveAimFov = settings.aimbotFOV * (scopedFovBoost ? scopedScale : 1.0f);
+				const float effectiveAimFovSqr = effectiveAimFov * effectiveAimFov;
+				const float maxAimDistance = settings.aimbotDis * kOneMeterUnits;
+				const float maxAimDistanceSqr = maxAimDistance * maxAimDistance;
+				const auto resolveCrosshairTargetIndex = [&](int crosshairEnt) -> int
+				{
+					if (crosshairEnt <= 0)
+						return -1;
+
+					auto directPlayerIndexIfValid = [&](int idx) -> int
+					{
+						if (idx < 0 || idx >= static_cast<int>(kMaxPlayers))
+							return -1;
+						if (!raw.players[idx].valid || raw.players[idx].pAddr == 0)
+							return -1;
+						return idx;
+					};
+
+					if (crosshairEnt <= static_cast<int>(kMaxPlayers))
+					{
+						const int byLegacyIndex = directPlayerIndexIfValid(crosshairEnt - 1);
+						if (byLegacyIndex >= 0)
+							return byLegacyIndex;
+					}
+
+					const int slotIndex = (crosshairEnt & 0x1FF) - 1;
+					const int bySlot = directPlayerIndexIfValid(slotIndex);
+					if (bySlot >= 0)
+						return bySlot;
+
+					if (raw.entityList == 0)
+						return -1;
+
+					const int entIndex = crosshairEnt & 0x7FFF;
+					if (entIndex <= 0)
+						return -1;
+
+					const std::uintptr_t listEntry = Read<std::uintptr_t>(raw.entityList + 0x8ull * ((entIndex & 0x7FFF) >> 9) + 16ull);
+					if (!listEntry)
+						return -1;
+
+					const std::uintptr_t crosshairPawn = Read<std::uintptr_t>(listEntry + 112ull * (entIndex & 0x1FF));
+					if (!crosshairPawn)
+						return -1;
+
+					for (int i = 0; i < static_cast<int>(kMaxPlayers); ++i)
+					{
+						if (!raw.players[i].valid)
+							continue;
+						if (raw.players[i].pAddr == crosshairPawn)
+							return i;
+					}
+
+					return -1;
+				};
 
 				int bestIndex = -1;
 				float bestDist = std::numeric_limits<float>::max();
@@ -1277,7 +1737,7 @@ namespace Cheats
 								continue;
 							}
 						}
-						if (rp.dis2LP > settings.aimbotDis * 75.0f)
+						if (rp.dis2LPSqr > maxAimDistanceSqr)
 							continue;
 
 						const int baseAimBone = std::clamp(settings.aimLocation, 0, static_cast<int>(kBoneCount) - 1);
@@ -1288,8 +1748,8 @@ namespace Cheats
 						if (baseTarget.z <= 0.0f || !InScreen(settings.screen, baseTarget.x, baseTarget.y))
 							continue;
 
-						const float baseDist = baseTarget.CalculateDistanceToPoint2D(cross);
-						if (baseDist >= settings.aimbotFOV)
+						const float baseDistSqr = baseTarget.CalculateDistanceToPoint2DSqr(cross);
+						if (baseDistSqr >= effectiveAimFovSqr)
 							continue;
 
 						int selectedAimBone = selectedAimBones[i];
@@ -1304,7 +1764,7 @@ namespace Cheats
 						}
 						else if (settings.utilVpkVisibilityParse)
 						{
-							selectedAimBone = GetFirstVisibleBoneIndex(raw, rp, ep, cross, settings.aimbotFOV, i);
+							selectedAimBone = GetFirstVisibleBoneIndex(raw, rp, ep, cross, effectiveAimFov, i);
 							if (selectedAimBone < 0)
 								continue;
 						}
@@ -1319,10 +1779,10 @@ namespace Cheats
 						if (target.z <= 0.0f || !InScreen(settings.screen, target.x, target.y))
 							continue;
 
-						float dist = target.CalculateDistanceToPoint2D(cross);
-						if (dist < settings.aimbotFOV && dist < bestDist)
+						const float distSqr = target.CalculateDistanceToPoint2DSqr(cross);
+						if (distSqr < effectiveAimFovSqr && distSqr < bestDist)
 						{
-							bestDist = dist;
+							bestDist = distSqr;
 							bestIndex = i;
 						}
 					}
@@ -1333,52 +1793,80 @@ namespace Cheats
 					const EspPlayer& target = esp.players[bestIndex];
 					const int selectedAimBone = selectedAimBones[bestIndex];
 					const Vector targetPos = target.screenBones[selectedAimBone];
-					float moveX = 0.0f;
-					float moveY = 0.0f;
+					Vector desiredMove{ 0.0f, 0.0f, 1.0f };
 
 					if (settings.aimRecoil && newAim.hasRecoil)
 					{
-						moveX = targetPos.x - newAim.recoilPos.x + static_cast<float>(settings.recoilX);
-						moveY = targetPos.y - newAim.recoilPos.y + static_cast<float>(settings.recoilY);
+						desiredMove.x = targetPos.x - newAim.recoilPos.x + static_cast<float>(settings.recoilX);
+						desiredMove.y = targetPos.y - newAim.recoilPos.y + static_cast<float>(settings.recoilY);
 					}
 					else
 					{
-						moveX = targetPos.x - cross.x;
-						moveY = targetPos.y - cross.y;
+						desiredMove.x = targetPos.x - cross.x;
+						desiredMove.y = targetPos.y - cross.y;
 					}
 
-					float currentMouseX = 0.0f;
-					float currentMouseY = 0.0f;
-					SpringAlgo(moveX, moveY, moveX, moveY, currentMouseX, currentMouseY,
-						settings.spring, settings.damping, settings.gravity, settings.mass);
-					mouse_event(MOUSEEVENTF_MOVE, static_cast<LONG>(currentMouseX), static_cast<LONG>(currentMouseY), 0, 0);
+					const int stableAimHz = std::clamp(settings.aimFrequencyHz, 90, 180);
+					const double deltaMs = 1000.0 / static_cast<double>(stableAimHz);
+
+					const bool triggerActive = true;
+					AimCurveConfig curveConfig{};
+					curveConfig.mode = static_cast<AimCurveMode>(std::clamp(settings.aimCurveMode, 0, 3));
+					curveConfig.speed = settings.aimCurveSpeed;
+					curveConfig.smoothing = settings.aimCurveSmoothing;
+
+					Vector curveDelta = curveTracker.Step(desiredMove, bestIndex, deltaMs, triggerActive, curveConfig);
+					curveDelta.x *= std::clamp(settings.aimCurveXSpeedScale, 0.20f, 2.00f);
+					curveDelta.y *= std::clamp(settings.aimCurveYSpeedScale, 0.20f, 2.00f);
+					curveDelta.x = std::clamp(curveDelta.x, -48.0f, 48.0f);
+					curveDelta.y = std::clamp(curveDelta.y, -24.0f, 24.0f);
+
+					float currentMouseX = curveDelta.x;
+					float currentMouseY = curveDelta.y;
+					carryX += currentMouseX;
+					carryY += currentMouseY;
+
+					const int moveXi = static_cast<int>(std::trunc(carryX));
+					const int moveYi = static_cast<int>(std::trunc(carryY));
+					carryX -= static_cast<float>(moveXi);
+					carryY -= static_cast<float>(moveYi);
+					int outputX = moveXi;
+					int outputY = moveYi;
+
+					if (outputX != 0 || outputY != 0)
+					{
+						mouseController.MoveRelative(outputX, outputY);
+						movedThisFrame = true;
+					}
+				}
+				else
+				{
+					curveTracker.Reset();
+					carryX = 0.0f;
+					carryY = 0.0f;
 				}
 
 				if (settings.aimTrigger && (GetAsyncKeyState(settings.triggerKey) & 0x8000))
 				{
-					if (raw.crosshairEnt > 0 && raw.crosshairEnt <= static_cast<int>(kMaxPlayers))
+					const int targetIndex = resolveCrosshairTargetIndex(raw.crosshairEnt);
+					if (targetIndex >= 0)
 					{
-						const int targetIndex = raw.crosshairEnt - 1;
 						const RawPlayer& target = raw.players[targetIndex];
-						if (target.valid && (!settings.utilTeamCheck || target.team != raw.local.team))
+						if (target.valid && target.lifeState == 256 && target.health > 0 && (!settings.utilTeamCheck || target.team != raw.local.team))
 						{
-							if (!settings.utilVisibleCheck)
-							{
+							if (!settings.utilVisibleCheck || settings.utilVpkVisibilityParse || target.spotted)
 								triggerShouldHold = true;
-							}
-							else if (settings.utilVpkVisibilityParse)
-							{
-								if (visRuntime && visRuntime->IsMapLoaded())
-								{
-										int firstVisibleBone = GetFirstVisibleBoneIndex(raw, target, esp.players[targetIndex], cross, settings.aimbotFOV, targetIndex);
-										if (firstVisibleBone >= 0)
-											triggerShouldHold = true;
-								}
-							}
-							else if (target.spotted)
-							{
-								triggerShouldHold = true;
-							}
+						}
+					}
+					else
+					{
+						const auto now = std::chrono::steady_clock::now();
+						if (now - lastTriggerDebugTick >= std::chrono::milliseconds(300))
+						{
+							char info[128]{};
+							sprintf_s(info, "trigger unresolved target, crosshair id:%d", raw.crosshairEnt);
+							Menu::输入调试状态 = info;
+							lastTriggerDebugTick = now;
 						}
 					}
 				}
@@ -1390,7 +1878,7 @@ namespace Cheats
 						if (lastBestIndex != -1)
 							std::this_thread::sleep_for(std::chrono::milliseconds(retargetDelayMs));
 					}
-					else if (lastBestIndex != -1 && bestIndex != lastBestIndex)
+					else if (!movedThisFrame && lastBestIndex != -1 && bestIndex != lastBestIndex)
 					{
 						std::this_thread::sleep_for(std::chrono::milliseconds(retargetDelayMs));
 					}
@@ -1398,38 +1886,66 @@ namespace Cheats
 
 				lastBestIndex = bestIndex;
 
-				if (triggerShouldHold)
 				{
-					if (!triggerHolding)
+					const auto now = std::chrono::steady_clock::now();
+					if (triggerShouldHold && !triggerPulseDown && now >= nextTriggerAllowedAt)
 					{
-						mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-						triggerHolding = true;
+						if (mouseController.LeftDownImmediate())
+						{
+							triggerPulseDown = true;
+							triggerPulseReleaseAt = now + std::chrono::milliseconds(10);
+						}
+					}
+
+					if (triggerPulseDown)
+					{
+						const bool shouldReleaseNow = (!triggerShouldHold) || (now >= triggerPulseReleaseAt);
+						if (shouldReleaseNow)
+						{
+							mouseController.LeftUpImmediate();
+							triggerPulseDown = false;
+							nextTriggerAllowedAt = now + std::chrono::milliseconds(std::clamp(settings.triggerIntervalMs, 30, 400));
+						}
 					}
 				}
-				else if (triggerHolding)
-				{
-					mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-					triggerHolding = false;
-				}
 			}
-			else if (triggerHolding)
+			else if (triggerPulseDown)
 			{
-				mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-				triggerHolding = false;
+				curveTracker.Reset();
+				carryX = 0.0f;
+				carryY = 0.0f;
+				mouseController.LeftUpImmediate();
+				triggerPulseDown = false;
 			}
 			if (settings.displayToggle)
+			{
+				curveTracker.Reset();
+				carryX = 0.0f;
+				carryY = 0.0f;
 				lastBestIndex = -1;
+				if (triggerPulseDown)
+				{
+					mouseController.LeftUpImmediate();
+					triggerPulseDown = false;
+				}
+				nextTriggerAllowedAt = std::chrono::steady_clock::now();
+			}
 
 			{
 				std::unique_lock lock(shared.aimMutex);
 				shared.aim = newAim;
 			}
 
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			const auto loopEnd = std::chrono::high_resolution_clock::now();
+			const std::chrono::duration<double, std::milli> elapsed = loopEnd - loopStart;
+			const int clampedAimHz = std::clamp(settings.aimFrequencyHz, 90, 180);
+			const double targetFrameMs = 1000.0 / static_cast<double>(clampedAimHz);
+			if (elapsed.count() < targetFrameMs)
+				PreciseSleepMs(targetFrameMs - elapsed.count());
 		}
 
-		if (triggerHolding)
-			mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+		if (triggerPulseDown)
+			mouseController.LeftUpImmediate();
 	}
 
 	const std::array<Game::SmartBoneCandidate, Game::kSmartBoneCandidateCount>& Game::GetSmartBonePriority() const
@@ -1490,7 +2006,8 @@ namespace Cheats
 	bool Game::IsBoneVisibleCached(int playerIndex,
 		int boneIndex,
 		const Vector& localEye,
-		const Vector& worldBone) const
+		const Vector& worldBone,
+		uint32_t frameTag) const
 	{
 		if (playerIndex < 0 || playerIndex >= static_cast<int>(kMaxPlayers))
 			return false;
@@ -1504,11 +2021,14 @@ namespace Cheats
 		{
 			std::lock_guard<std::mutex> lock(visCacheMutex);
 			BoneVisCacheEntry& cache = visBoneCache_[playerIndex][boneIndex];
+			if (frameTag != 0 && cache.valid && cache.frameTag == frameTag)
+				return cache.visible;
+
 			if (cache.valid)
 			{
 				const bool notExpired = (nowMs - cache.timestampMs) < kVisRayIntervalMs;
-				const bool eyeStable = cache.localEye.CalcDis2Point3D(localEye) <= kEyeEpsilon;
-				const bool boneStable = cache.worldBone.CalcDis2Point3D(worldBone) <= kBoneEpsilon;
+				const bool eyeStable = cache.localEye.CalcDis2Point3DSqr(localEye) <= (kEyeEpsilon * kEyeEpsilon);
+				const bool boneStable = cache.worldBone.CalcDis2Point3DSqr(worldBone) <= (kBoneEpsilon * kBoneEpsilon);
 				if (notExpired && eyeStable && boneStable)
 					return cache.visible;
 			}
@@ -1522,6 +2042,7 @@ namespace Cheats
 			cache.valid = true;
 			cache.visible = visible;
 			cache.timestampMs = nowMs;
+			cache.frameTag = frameTag;
 			cache.localEye = localEye;
 			cache.worldBone = worldBone;
 		}
@@ -1540,10 +2061,12 @@ namespace Cheats
 			return -1;
 
 		const float clampedFov = (std::max)(0.0f, fovRadius);
+		const float clampedFovSqr = clampedFov * clampedFov;
 		if (clampedFov <= 0.0f)
 			return -1;
 
 		const Vector localEye = raw.local.origin + raw.local.viewOffset;
+		const uint32_t visFrameTag = static_cast<uint32_t>(GetTickCount64() / kVisRayIntervalMs);
 		for (const SmartBoneCandidate& candidate : GetSmartBonePriority())
 		{
 			if (candidate.rawBoneIndex >= rp.worldBones.size() ||
@@ -1557,11 +2080,11 @@ namespace Cheats
 			if (screenBone.z <= 0.0f)
 				continue;
 
-			const float distToCross = screenBone.CalculateDistanceToPoint2D(cross);
-			if (distToCross >= clampedFov)
+			const float distToCrossSqr = screenBone.CalculateDistanceToPoint2DSqr(cross);
+			if (distToCrossSqr >= clampedFovSqr)
 				continue;
 
-			if (IsBoneVisibleCached(playerIndex, static_cast<int>(candidate.rawBoneIndex), localEye, worldBone))
+			if (IsBoneVisibleCached(playerIndex, static_cast<int>(candidate.rawBoneIndex), localEye, worldBone, visFrameTag))
 				return static_cast<int>(candidate.rawBoneIndex);
 		}
 
@@ -1625,6 +2148,9 @@ namespace Cheats
 
 		if (settings.visCross)
 			DrawCross(esp.cross);
+
+		if (settings.utilDraw && settings.visBombEsp)
+			DrawBombEsp(esp);
 
 		if (!settings.utilDraw)
 			return;
@@ -1800,7 +2326,14 @@ namespace Cheats
 			return;
 		}
 
-		std::string mapName = NormalizeMapName(ReadCurrentMapName());
+		std::string mapName = cachedMapName;
+		if (mapName.empty())
+			mapName = NormalizeMapName(ReadCurrentMapName());
+		if (!mapName.empty())
+		{
+			cachedMapName = mapName;
+			cachedMapNameAtMs = GetNowMs();
+		}
 		if (mapName.empty())
 			mapName = NormalizeMapName(Menu::helper地图名);
 		if (mapName.empty())
@@ -2067,11 +2600,20 @@ namespace Cheats
 		if (!settings.helperListRefreshPending && !settings.helperListSavePending)
 			return;
 
-		std::string currentMap = ReadCurrentMapName();
+		std::string currentMap = cachedMapName;
+		if (currentMap.empty() || (GetNowMs() - cachedMapNameAtMs) >= 1000)
+		{
+			currentMap = NormalizeMapName(ReadCurrentMapName());
+			if (!currentMap.empty())
+			{
+				cachedMapName = currentMap;
+				cachedMapNameAtMs = GetNowMs();
+			}
+		}
 		if (currentMap.empty())
 			currentMap = NormalizeMapName(Menu::helper地图名);
-		if (currentMap.empty())
-			currentMap = NormalizeMapName(raw.hasLocal ? ReadCurrentMapName() : std::string{});
+		if (currentMap.empty() && raw.hasLocal)
+			currentMap = cachedMapName;
 		if (currentMap.empty())
 			currentMap = "de_dust2";
 
@@ -2212,7 +2754,7 @@ namespace Cheats
 
 		if (settings.configSavePending)
 		{
-			std::string cfgName = settings.configName;
+			std::string cfgName = TrimAsciiWhitespace(settings.configName);
 			if (cfgName.empty())
 			{
 				if (!Menu::config列表.empty() && settings.configSelectedIndex >= 0 && settings.configSelectedIndex < static_cast<int>(Menu::config列表.size()))
@@ -2236,7 +2778,7 @@ namespace Cheats
 
 		if (settings.configLoadPending)
 		{
-			std::string cfgName = settings.configName;
+			std::string cfgName = TrimAsciiWhitespace(settings.configName);
 			if ((cfgName.empty() || cfgName == "default") &&
 				!Menu::config列表.empty() &&
 				settings.configSelectedIndex >= 0 &&
@@ -2261,6 +2803,184 @@ namespace Cheats
 				Menu::config状态 = std::string(u8"加载失败: ") + error;
 			}
 		}
+	}
+
+	void Game::BuildGrenadeRenderState(const RawState& raw, const SettingsSnapshot& settings, GrenadeRenderState& out) const
+	{
+		out = {};
+
+		if (!settings.helperEnabled || !raw.hasLocal || !raw.hasMatrix || settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
+			return;
+
+		GrenadeMapData snapshot{};
+		{
+			std::scoped_lock grenadeLock(grenadeMutex);
+			snapshot = grenadeData;
+		}
+		if (snapshot.spots.empty())
+			return;
+
+		const std::string currentWeapon = settings.helperManualTypeOverride
+			? GrenadeTypeLabelByIndex(settings.helperManualType)
+			: ReadCurrentGrenadeType(raw);
+		if (settings.helperFilterByWeapon && currentWeapon == "Unknown")
+			return;
+
+		struct StandDrawItem
+		{
+			const GrenadeSpot* spot = nullptr;
+			Vector standScreen{};
+		};
+
+		struct AimDrawItem
+		{
+			const GrenadeSpot* spot = nullptr;
+			Vector aimScreen{};
+			float distToCross = std::numeric_limits<float>::max();
+		};
+
+		std::vector<StandDrawItem> standItems{};
+		std::vector<AimDrawItem> aimItems{};
+		standItems.reserve(snapshot.spots.size());
+		aimItems.reserve(snapshot.spots.size());
+
+		const Vector localPos = raw.local.origin;
+		const Vector localEye = raw.local.origin + raw.local.viewOffset;
+		const float yawRad = raw.local.yaw * (kPi / 180.0f);
+		const float pitchRad = raw.local.pitch * (kPi / 180.0f);
+		const Vector camForward{
+			std::cos(pitchRad) * std::cos(yawRad),
+			std::cos(pitchRad) * std::sin(yawRad),
+			-std::sin(pitchRad)
+		};
+		const Vector cross = GetCross(settings.screen);
+		const float maxStandDrawDistanceSqr = settings.helperMaxStandDrawDistance * settings.helperMaxStandDrawDistance;
+		const float standToleranceSqr = settings.helperStandTolerance * settings.helperStandTolerance;
+		const float stickyStandTolerance = settings.helperStandTolerance * 1.35f;
+		const float stickyStandToleranceSqr = stickyStandTolerance * stickyStandTolerance;
+		const float focusRadiusSqr = settings.helperFocusRadius * settings.helperFocusRadius;
+
+		int previousSelectedSpotId = 0;
+		{
+			std::shared_lock lock(shared.grenadeMutex);
+			previousSelectedSpotId = shared.grenadeFront.selectedSpotId;
+		}
+
+		const GrenadeSpot* closest = nullptr;
+		float minCrossDist = std::numeric_limits<float>::max();
+
+		for (const auto& spot : snapshot.spots)
+		{
+			if (settings.helperFilterByWeapon && spot.type != currentWeapon)
+				continue;
+
+			const float standDistSqr = localPos.CalcDis2Point3DSqr(spot.standPos);
+			if (standDistSqr > maxStandDrawDistanceSqr)
+				continue;
+			const bool stickyCandidate = previousSelectedSpotId != 0 && previousSelectedSpotId == spot.id;
+			const float activeStandToleranceSqr = stickyCandidate ? stickyStandToleranceSqr : standToleranceSqr;
+			const bool withinStandTolerance = standDistSqr <= activeStandToleranceSqr;
+
+			const Vector toStand = spot.standPos - localEye;
+			const float forwardDot = toStand.x * camForward.x + toStand.y * camForward.y + toStand.z * camForward.z;
+			if (!withinStandTolerance && forwardDot < 0.0f)
+				continue;
+
+			if (settings.helperDrawStand)
+			{
+				Vector standScreen{};
+				if (WorldToScreen(spot.standPos, raw.matrix, settings.screen, standScreen) &&
+					InScreen(settings.screen, standScreen.x, standScreen.y))
+				{
+					standItems.push_back({ &spot, standScreen });
+				}
+			}
+
+			if (!settings.helperDrawAim)
+				continue;
+
+			if (standDistSqr > activeStandToleranceSqr)
+				continue;
+
+			Vector aimScreen{};
+			if (!WorldToScreen(spot.aimPos, raw.matrix, settings.screen, aimScreen))
+				continue;
+			if (!InScreen(settings.screen, aimScreen.x, aimScreen.y))
+				aimScreen = ClampToScreenEdge(settings.screen, aimScreen);
+
+			const float distToCross = aimScreen.CalculateDistanceToPoint2DSqr(cross);
+			aimItems.push_back({ &spot, aimScreen, distToCross });
+
+			if (distToCross < minCrossDist)
+			{
+				minCrossDist = distToCross;
+				closest = &spot;
+			}
+		}
+
+		if (standItems.empty() && aimItems.empty())
+			return;
+
+		const bool focusingByCrosshair = !aimItems.empty() && minCrossDist <= focusRadiusSqr;
+
+		const GrenadeSpot* selectedSpot = closest;
+
+		if (!selectedSpot && !standItems.empty())
+			selectedSpot = standItems.front().spot;
+
+		out.valid = true;
+		out.cross = cross;
+		out.selectedSpotId = selectedSpot ? selectedSpot->id : 0;
+		out.standItems.reserve(standItems.size());
+		out.aimItems.reserve(aimItems.size());
+
+		if (settings.helperDrawStand)
+		{
+			for (const auto& item : standItems)
+			{
+				GrenadeStandRenderItem renderItem{};
+				renderItem.screen = item.standScreen;
+				renderItem.label = item.spot->name;
+				if (!item.spot->throwType.empty())
+					renderItem.label += " [" + LocalizeThrowType(item.spot->throwType) + "]";
+				out.standItems.push_back(std::move(renderItem));
+			}
+		}
+
+		const float looseGuideDistanceSqr = settings.helperLooseGuideDistance * settings.helperLooseGuideDistance;
+		for (const auto& item : aimItems)
+		{
+			if (focusingByCrosshair && item.spot != closest)
+				continue;
+
+			GrenadeAimRenderItem renderItem{};
+			renderItem.screen = item.aimScreen;
+			renderItem.isTarget = (selectedSpot && item.spot == selectedSpot);
+			renderItem.drawGuide = (focusingByCrosshair && renderItem.isTarget)
+				|| (!focusingByCrosshair && renderItem.isTarget && item.distToCross <= looseGuideDistanceSqr);
+			renderItem.label = item.spot->name;
+			if (!item.spot->throwType.empty())
+				renderItem.label += " [" + LocalizeThrowType(item.spot->throwType) + "]";
+			out.aimItems.push_back(std::move(renderItem));
+		}
+
+		if (selectedSpot)
+		{
+			std::string throwType = LocalizeThrowType(selectedSpot->throwType.empty() ? "StandThrow" : selectedSpot->throwType);
+			out.topText = std::string(u8"投掷方式: ") + throwType;
+			if (!selectedSpot->name.empty())
+				out.topText += "  |  " + selectedSpot->name;
+		}
+	}
+
+	void Game::PublishGrenadeRenderState(GrenadeRenderState&& nextState)
+	{
+		{
+			std::unique_lock lock(shared.grenadeMutex);
+			shared.grenadeBack = std::move(nextState);
+			std::swap(shared.grenadeFront, shared.grenadeBack);
+		}
+		shared.grenadeRevision.fetch_add(1, std::memory_order_release);
 	}
 
 	// 教学注释：返回 Configs 目录下全部 .json 配置名称（不含扩展名）。
@@ -2290,20 +3010,21 @@ namespace Cheats
 	// 这里刻意保存“用户配置层”而不是运行时缓存层，便于教学和后续扩展。
 	bool Game::SaveConfig(const std::string& name, std::string& error) const
 	{
-		if (name.empty())
+		const std::string cfgName = NormalizeConfigName(name);
+		if (cfgName.empty())
 		{
-			error = u8"配置名不能为空";
+			error = u8"配置名不能为空或包含非法字符";
 			return false;
 		}
 
 		std::filesystem::create_directories(kConfigDir);
-		const std::filesystem::path path = kConfigDir / (name + ".json");
+		const std::filesystem::path path = kConfigDir / (cfgName + ".json");
 
 		rapidjson::Document doc;
 		doc.SetObject();
 		auto& allocator = doc.GetAllocator();
 
-		doc.AddMember("name", rapidjson::Value(name.c_str(), allocator), allocator);
+		doc.AddMember("name", rapidjson::Value(cfgName.c_str(), allocator), allocator);
 
 		rapidjson::Value visual(rapidjson::kObjectType);
 		visual.AddMember("team_check", Menu::util判断阵营, allocator);
@@ -2316,6 +3037,7 @@ namespace Cheats
 		visual.AddMember("visible_bones", Menu::vis绘制可视骨骼点, allocator);
 		visual.AddMember("health", Menu::vis绘制血条, allocator);
 		visual.AddMember("distance", Menu::vis绘制距离, allocator);
+		visual.AddMember("bomb_esp", Menu::vis绘制C4, allocator);
 		visual.AddMember("cross", Menu::vis绘制准心, allocator);
 
 		rapidjson::Value bonesColor(rapidjson::kArrayType);
@@ -2345,13 +3067,24 @@ namespace Cheats
 		aim.AddMember("recoil_y", Menu::recoil_Y, allocator);
 		aim.AddMember("aim_key", Menu::aimKey, allocator);
 		aim.AddMember("trigger_key", Menu::triggerKey, allocator);
-		aim.AddMember("mass", Menu::MASS, allocator);
-		aim.AddMember("spring", Menu::SPRING_CONSTANT, allocator);
-		aim.AddMember("damping", Menu::DAMPING_CONSTANT, allocator);
-		aim.AddMember("gravity", Menu::GRAVITY_CONSTANT, allocator);
+		aim.AddMember("trigger_interval_ms", std::clamp(Menu::扳机间隔毫秒, 30, 400), allocator);
+		aim.AddMember("frequency_hz", std::clamp(Menu::瞄准频率Hz, 90, 180), allocator);
+		aim.AddMember("curve_mode", std::clamp(Menu::瞄准曲线模式, 0, 3), allocator);
+		aim.AddMember("curve_speed", Menu::曲线速度, allocator);
+		aim.AddMember("curve_x_speed_scale", std::clamp(Menu::曲线X速度比例, 0.20f, 2.00f), allocator);
+		aim.AddMember("curve_y_speed_scale", std::clamp(Menu::曲线Y速度比例, 0.20f, 2.00f), allocator);
+		aim.AddMember("curve_smoothing", Menu::曲线平滑, allocator);
+		aim.AddMember("scoped_fov_scale", std::clamp(Menu::开镜FOV倍率, 1.00f, 2.50f), allocator);
 		aim.AddMember("read_sleep_ms", Menu::read线程休眠毫秒, allocator);
 		aim.AddMember("esp_sleep_ms", Menu::esp线程休眠毫秒, allocator);
 		aim.AddMember("retarget_delay_ms", Menu::瞄准切换延时毫秒, allocator);
+		rapidjson::Value input(rapidjson::kObjectType);
+		input.AddMember("method_selected", Menu::输入方式选择, allocator);
+		input.AddMember("method_applied", Menu::输入方式当前生效, allocator);
+		input.AddMember("endpoint", rapidjson::Value(Menu::输入地址, allocator), allocator);
+		input.AddMember("uuid", rapidjson::Value(Menu::输入UUID, allocator), allocator);
+		input.AddMember("auto_connect", Menu::输入自动连接, allocator);
+		aim.AddMember("input", input, allocator);
 		doc.AddMember("aim", aim, allocator);
 
 		rapidjson::Value helper(rapidjson::kObjectType);
@@ -2391,13 +3124,14 @@ namespace Cheats
 	// 使用“字段存在才覆盖”的策略，保证旧版配置文件也能被兼容加载。
 	bool Game::LoadConfig(const std::string& name, std::string& error) const
 	{
-		if (name.empty())
+		const std::string cfgName = NormalizeConfigName(name);
+		if (cfgName.empty())
 		{
-			error = u8"配置名不能为空";
+			error = u8"配置名不能为空或包含非法字符";
 			return false;
 		}
 
-		const std::filesystem::path path = kConfigDir / (name + ".json");
+		const std::filesystem::path path = kConfigDir / (cfgName + ".json");
 		std::ifstream in(path);
 		if (!in.is_open())
 		{
@@ -2427,6 +3161,7 @@ namespace Cheats
 			if (visual.HasMember("visible_bones") && visual["visible_bones"].IsBool()) Menu::vis绘制可视骨骼点 = visual["visible_bones"].GetBool();
 			if (visual.HasMember("health") && visual["health"].IsBool()) Menu::vis绘制血条 = visual["health"].GetBool();
 			if (visual.HasMember("distance") && visual["distance"].IsBool()) Menu::vis绘制距离 = visual["distance"].GetBool();
+			if (visual.HasMember("bomb_esp") && visual["bomb_esp"].IsBool()) Menu::vis绘制C4 = visual["bomb_esp"].GetBool();
 			if (visual.HasMember("cross") && visual["cross"].IsBool()) Menu::vis绘制准心 = visual["cross"].GetBool();
 
 			auto LoadColorArray = [](const rapidjson::Value& src, float dst[4]) {
@@ -2459,13 +3194,31 @@ namespace Cheats
 			if (aim.HasMember("recoil_y") && aim["recoil_y"].IsInt()) Menu::recoil_Y = aim["recoil_y"].GetInt();
 			if (aim.HasMember("aim_key") && aim["aim_key"].IsInt()) Menu::aimKey = aim["aim_key"].GetInt();
 			if (aim.HasMember("trigger_key") && aim["trigger_key"].IsInt()) Menu::triggerKey = aim["trigger_key"].GetInt();
-			if (aim.HasMember("mass") && aim["mass"].IsNumber()) Menu::MASS = static_cast<float>(aim["mass"].GetDouble());
-			if (aim.HasMember("spring") && aim["spring"].IsNumber()) Menu::SPRING_CONSTANT = static_cast<float>(aim["spring"].GetDouble());
-			if (aim.HasMember("damping") && aim["damping"].IsNumber()) Menu::DAMPING_CONSTANT = static_cast<float>(aim["damping"].GetDouble());
-			if (aim.HasMember("gravity") && aim["gravity"].IsNumber()) Menu::GRAVITY_CONSTANT = static_cast<float>(aim["gravity"].GetDouble());
+			if (aim.HasMember("trigger_interval_ms") && aim["trigger_interval_ms"].IsInt()) Menu::扳机间隔毫秒 = std::clamp(aim["trigger_interval_ms"].GetInt(), 30, 400);
+			if (aim.HasMember("frequency_hz") && aim["frequency_hz"].IsInt()) Menu::瞄准频率Hz = std::clamp(aim["frequency_hz"].GetInt(), 90, 180);
+			if (aim.HasMember("curve_mode") && aim["curve_mode"].IsInt()) Menu::瞄准曲线模式 = std::clamp(aim["curve_mode"].GetInt(), 0, 3);
+			if (aim.HasMember("curve_speed") && aim["curve_speed"].IsNumber()) Menu::曲线速度 = std::clamp(static_cast<float>(aim["curve_speed"].GetDouble()), 0.4f, 2.5f);
+			if (aim.HasMember("curve_x_speed_scale") && aim["curve_x_speed_scale"].IsNumber()) Menu::曲线X速度比例 = std::clamp(static_cast<float>(aim["curve_x_speed_scale"].GetDouble()), 0.20f, 2.00f);
+			if (aim.HasMember("curve_y_speed_scale") && aim["curve_y_speed_scale"].IsNumber()) Menu::曲线Y速度比例 = std::clamp(static_cast<float>(aim["curve_y_speed_scale"].GetDouble()), 0.20f, 2.00f);
+			if (aim.HasMember("scoped_fov_scale") && aim["scoped_fov_scale"].IsNumber()) Menu::开镜FOV倍率 = std::clamp(static_cast<float>(aim["scoped_fov_scale"].GetDouble()), 1.00f, 2.50f);
+			if (aim.HasMember("curve_frequency") && aim["curve_frequency"].IsNumber())
+			{
+				const float legacyFrequency = std::clamp(static_cast<float>(aim["curve_frequency"].GetDouble()), 0.3f, 3.0f);
+				Menu::曲线速度 = std::clamp((Menu::曲线速度 + legacyFrequency * 0.35f), 0.4f, 2.5f);
+			}
+			if (aim.HasMember("curve_smoothing") && aim["curve_smoothing"].IsNumber()) Menu::曲线平滑 = std::clamp(static_cast<float>(aim["curve_smoothing"].GetDouble()), 0.30f, 0.95f);
 			if (aim.HasMember("read_sleep_ms") && aim["read_sleep_ms"].IsInt()) Menu::read线程休眠毫秒 = aim["read_sleep_ms"].GetInt();
 			if (aim.HasMember("esp_sleep_ms") && aim["esp_sleep_ms"].IsInt()) Menu::esp线程休眠毫秒 = aim["esp_sleep_ms"].GetInt();
 			if (aim.HasMember("retarget_delay_ms") && aim["retarget_delay_ms"].IsInt()) Menu::瞄准切换延时毫秒 = aim["retarget_delay_ms"].GetInt();
+			if (aim.HasMember("input") && aim["input"].IsObject())
+			{
+				const auto& input = aim["input"];
+				if (input.HasMember("method_selected") && input["method_selected"].IsInt()) Menu::输入方式选择 = input["method_selected"].GetInt();
+				if (input.HasMember("method_applied") && input["method_applied"].IsInt()) Menu::输入方式当前生效 = input["method_applied"].GetInt();
+				if (input.HasMember("endpoint") && input["endpoint"].IsString()) strncpy_s(Menu::输入地址, input["endpoint"].GetString(), _TRUNCATE);
+				if (input.HasMember("uuid") && input["uuid"].IsString()) strncpy_s(Menu::输入UUID, input["uuid"].GetString(), _TRUNCATE);
+				if (input.HasMember("auto_connect") && input["auto_connect"].IsBool()) Menu::输入自动连接 = input["auto_connect"].GetBool();
+			}
 		}
 
 		if (doc.HasMember("helper") && doc["helper"].IsObject())
@@ -2494,280 +3247,62 @@ namespace Cheats
 
 	void Game::RenderGrenadeHelper(const RawState& raw, const SettingsSnapshot& settings) const
 	{
-		// 教学注释：该函数是投掷物辅助的核心渲染入口。
-		// 主要分为四步：
-		// 1) 收集可绘制的站位点与瞄点；
-		// 2) 进行准星聚焦/鼠标悬停判定；
-		// 3) 绘制站位与聚类后的名称列表；
-		// 4) 绘制瞄点引导与顶部投掷方式提示。
+		(void)raw;
 		Menu::helper当前瞄准点位ID = 0;
 
-		if (!raw.hasLocal || !raw.hasMatrix || settings.screen.x <= 0.0f || settings.screen.y <= 0.0f)
-			return;
-
-		// 教学注释：为减少“点位很多时每帧深拷贝数据”带来的卡顿和拖影，
-		// 这里改为在渲染期间直接读取共享缓存，不再复制整份 grenadeData。
-		std::scoped_lock grenadeLock(grenadeMutex);
-		if (grenadeData.spots.empty())
-			return;
-
-		const std::string currentWeapon = settings.helperManualTypeOverride
-			? GrenadeTypeLabelByIndex(settings.helperManualType)
-			: ReadCurrentGrenadeType(raw);
-		if (settings.helperFilterByWeapon && currentWeapon == "Unknown")
-			return;
-
-		// 教学注释：站位绘制数据缓存。先收集、后统一渲染，避免逻辑分散。
-		struct StandDrawItem
+		GrenadeRenderState state{};
 		{
-			const GrenadeSpot* spot = nullptr;
-			Vector standScreen{};
-		};
-
-		// 教学注释：瞄点绘制数据缓存，额外保存到准星/鼠标的距离用于聚焦判定。
-		struct AimDrawItem
-		{
-			const GrenadeSpot* spot = nullptr;
-			Vector aimScreen{};
-			float distToCross = std::numeric_limits<float>::max();
-			float distToMouse = std::numeric_limits<float>::max();
-		};
-
-		std::vector<StandDrawItem> standItems{};
-		std::vector<AimDrawItem> aimItems{};
-		standItems.reserve(grenadeData.spots.size());
-		aimItems.reserve(grenadeData.spots.size());
-
-		const Vector localPos = raw.local.origin;
-		const Vector cross = GetCross(settings.screen);
-		const ImVec2 mouse = ImGui::GetIO().MousePos;
-		const Vector mousePos{ mouse.x, mouse.y, 0.0f };
-		constexpr float kAimCircleRadius = 10.0f;
-		constexpr float kAimHoverRadius = 16.0f;
-		constexpr float kStandClusterRadius = 26.0f;
-
-		const GrenadeSpot* closest = nullptr;
-		float minCrossDist = std::numeric_limits<float>::max();
-
-		for (const auto& spot : grenadeData.spots)
-		{
-			if (settings.helperFilterByWeapon && spot.type != currentWeapon)
-				continue;
-
-			const float standDist = localPos.CalcDis2Point3D(spot.standPos);
-			if (standDist > settings.helperMaxStandDrawDistance)
-				continue;
-
-			if (settings.helperDrawStand)
-			{
-				Vector standScreen{};
-				if (WorldToScreen(spot.standPos, raw.matrix, settings.screen, standScreen) &&
-					InScreen(settings.screen, standScreen.x, standScreen.y))
-				{
-					standItems.push_back({ &spot, standScreen });
-				}
-			}
-
-			if (!settings.helperDrawAim)
-				continue;
-
-			if (standDist > settings.helperStandTolerance)
-				continue;
-
-			Vector aimScreen{};
-			if (!WorldToScreen(spot.aimPos, raw.matrix, settings.screen, aimScreen))
-				continue;
-			if (!InScreen(settings.screen, aimScreen.x, aimScreen.y))
-				continue;
-
-			const float distToCross = aimScreen.CalculateDistanceToPoint2D(cross);
-			const float distToMouse = aimScreen.CalculateDistanceToPoint2D(mousePos);
-			aimItems.push_back({ &spot, aimScreen, distToCross, distToMouse });
-
-			if (distToCross < minCrossDist)
-			{
-				minCrossDist = distToCross;
-				closest = &spot;
-			}
+			std::shared_lock lock(shared.grenadeMutex);
+			state = shared.grenadeFront;
 		}
-
-		if (standItems.empty() && aimItems.empty())
+		if (!state.valid)
 			return;
-
-		// 教学注释：准星聚焦模式。准星足够接近瞄点时，优先高亮最近目标。
-		const bool focusingByCrosshair = minCrossDist <= settings.helperFocusRadius;
-
-		const GrenadeSpot* hoveredSpot = nullptr;
-		float minMouseDist = std::numeric_limits<float>::max();
-		for (const auto& item : aimItems)
-		{
-			if (item.distToMouse <= kAimHoverRadius && item.distToMouse < minMouseDist)
-			{
-				minMouseDist = item.distToMouse;
-				hoveredSpot = item.spot;
-			}
-		}
-
-		// 教学注释：鼠标悬停模式。用于“只看一个目标”的极简视图。
-		const bool focusingByMouse = (hoveredSpot != nullptr);
-		const bool isolateMode = focusingByMouse;
-		const GrenadeSpot* selectedSpot = focusingByMouse ? hoveredSpot : closest;
 
 		auto* draw = ImGui::GetBackgroundDrawList();
+		constexpr float kAimCircleRadius = 10.0f;
 
-		if (settings.helperDrawStand && !standItems.empty())
+		for (const auto& stand : state.standItems)
 		{
-			// 教学注释：聚类后的展示结构。将空间上相近的多个站位名称合并成“列表列”，
-			// 解决密集投掷点位下名称重叠难读的问题。
-			struct StandCluster
-			{
-				Vector center{};
-				std::vector<const StandDrawItem*> items{};
-			};
+			draw->AddCircleFilled({ stand.screen.x, stand.screen.y }, 4.0f, ImColor(255, 255, 0));
+			if (!stand.label.empty())
+				AddTextShadow(draw, { stand.screen.x + 6.0f, stand.screen.y + 8.0f }, ImColor(255, 255, 255), stand.label.c_str());
+		}
 
-			std::vector<const StandDrawItem*> standRefs{};
-			standRefs.reserve(standItems.size());
-			for (const auto& item : standItems)
+		for (const auto& aim : state.aimItems)
+		{
+			const ImColor pointColor = aim.isTarget ? ImColor(255, 80, 80) : ImColor(0, 255, 0);
+			draw->AddCircle({ aim.screen.x, aim.screen.y }, kAimCircleRadius, pointColor, 0, 2.0f);
+
+			if (aim.drawGuide)
 			{
-				if (isolateMode && item.spot != selectedSpot)
-					continue;
-				standRefs.push_back(&item);
+				draw->AddLine(
+					{ state.cross.x, state.cross.y },
+					{ aim.screen.x, aim.screen.y },
+					aim.isTarget ? ImColor(255, 60, 60) : ImColor(255, 255, 255, 120),
+					aim.isTarget ? 2.0f : 1.0f);
 			}
 
-			std::vector<StandCluster> clusters{};
-			clusters.reserve(standRefs.size());
-
-			for (const StandDrawItem* item : standRefs)
+			if (!aim.label.empty())
 			{
-				bool merged = false;
-				for (auto& cluster : clusters)
-				{
-					if (item->standScreen.CalculateDistanceToPoint2D(cluster.center) > kStandClusterRadius)
-						continue;
-
-					cluster.items.push_back(item);
-					const float count = static_cast<float>(cluster.items.size());
-					cluster.center.x = (cluster.center.x * (count - 1.0f) + item->standScreen.x) / count;
-					cluster.center.y = (cluster.center.y * (count - 1.0f) + item->standScreen.y) / count;
-					merged = true;
-					break;
-				}
-
-				if (!merged)
-				{
-					StandCluster cluster{};
-					cluster.center = item->standScreen;
-					cluster.items.push_back(item);
-					clusters.push_back(std::move(cluster));
-				}
-			}
-
-			for (const auto& cluster : clusters)
-			{
-				draw->AddCircleFilled({ cluster.center.x, cluster.center.y }, 4.0f, ImColor(255, 255, 0));
-
-				if (cluster.items.empty())
-					continue;
-
-				if (cluster.items.size() == 1)
-				{
-					const GrenadeSpot* spot = cluster.items.front()->spot;
-					std::string label = spot->name;
-					if (!spot->throwType.empty())
-						label += " [" + LocalizeThrowType(spot->throwType) + "]";
-					AddTextShadow(draw, { cluster.center.x + 6.0f, cluster.center.y + 8.0f }, ImColor(255, 255, 255), label.c_str());
-					continue;
-				}
-
-				std::vector<std::string> rows{};
-				rows.reserve(cluster.items.size());
-				for (const StandDrawItem* rowItem : cluster.items)
-				{
-					std::string row = rowItem->spot->name;
-					if (!rowItem->spot->throwType.empty())
-						row += " [" + LocalizeThrowType(rowItem->spot->throwType) + "]";
-					rows.push_back(std::move(row));
-				}
-
-				std::sort(rows.begin(), rows.end());
-				rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
-
-				const float lineHeight = ImGui::GetTextLineHeight();
-				const float columnX = cluster.center.x + 12.0f;
-				const float columnY = cluster.center.y + 10.0f;
-
-				// 教学注释：按你的要求去掉黑底边框面板，改为“按列纯文本”展示。
-				for (size_t i = 0; i < rows.size(); ++i)
-				{
-					AddTextShadow(
-						draw,
-						{ columnX, columnY + static_cast<float>(i) * lineHeight },
-						ImColor(255, 255, 255),
-						rows[i].c_str());
-				}
+				AddTextShadow(
+					draw,
+					{ aim.screen.x + 12.0f, aim.screen.y - 16.0f },
+					aim.isTarget ? ImColor(255, 245, 190) : ImColor(215, 215, 215),
+					aim.label.c_str());
 			}
 		}
 
-		for (const auto& item : aimItems)
+		Menu::helper当前瞄准点位ID = state.selectedSpotId;
+		if (!state.topText.empty())
 		{
-			if (focusingByMouse && item.spot != hoveredSpot)
-				continue;
-			if (!focusingByMouse && focusingByCrosshair && item.spot != closest)
-				continue;
-
-			const bool isTarget = (item.spot == selectedSpot);
-			const ImColor pointColor = isTarget ? ImColor(255, 80, 80) : ImColor(0, 255, 0);
-			draw->AddCircle(
-				{ item.aimScreen.x, item.aimScreen.y },
-				kAimCircleRadius,
-				pointColor,
-				0,
-				2.0f);
-
-			if (focusingByMouse || focusingByCrosshair)
-			{
-				draw->AddLine(
-					{ cross.x, cross.y },
-					{ item.aimScreen.x, item.aimScreen.y },
-					ImColor(255, 60, 60),
-					2.0f);
-			}
-			else if (item.distToCross <= settings.helperLooseGuideDistance && isTarget)
-			{
-				draw->AddLine(
-					{ cross.x, cross.y },
-					{ item.aimScreen.x, item.aimScreen.y },
-					ImColor(255, 255, 255, 120),
-					1.0f);
-			}
-
-			std::string aimLabel = item.spot->name;
-			if (!item.spot->throwType.empty())
-				aimLabel += " [" + LocalizeThrowType(item.spot->throwType) + "]";
-			AddTextShadow(
-				draw,
-				{ item.aimScreen.x + 12.0f, item.aimScreen.y - 16.0f },
-				isTarget ? ImColor(255, 245, 190) : ImColor(215, 215, 215),
-				aimLabel.c_str());
-		}
-
-		if (selectedSpot)
-		{
-			Menu::helper当前瞄准点位ID = selectedSpot->id;
-
-			std::string throwType = LocalizeThrowType(selectedSpot->throwType.empty() ? "StandThrow" : selectedSpot->throwType);
-			std::string topText = std::string(u8"投掷方式: ") + throwType;
-			if (!selectedSpot->name.empty())
-				topText += "  |  " + selectedSpot->name;
-
 			const float fontSize = 30.0f;
-			const ImVec2 textSize = ImGui::GetFont()->CalcTextSizeA(fontSize, 2000.0f, 0.0f, topText.c_str());
+			const ImVec2 textSize = ImGui::GetFont()->CalcTextSizeA(fontSize, 2000.0f, 0.0f, state.topText.c_str());
 			const ImVec2 textPos{
 				(settings.screen.x - textSize.x) * 0.5f + settings.helperTopHintOffsetX,
 				28.0f + settings.helperTopHintOffsetY
 			};
 
-			AddTextShadow(ImGui::GetBackgroundDrawList(), ImGui::GetFont(), fontSize, textPos, ImColor(255, 220, 120), topText.c_str());
+			AddTextShadow(ImGui::GetBackgroundDrawList(), ImGui::GetFont(), fontSize, textPos, ImColor(255, 220, 120), state.topText.c_str());
 		}
 	}
 }
