@@ -23,6 +23,7 @@
 #include "AlgorAim.h"
 
 constexpr float kPi = 3.14159265358979323846f;
+constexpr uint64_t kVisRayIntervalMs = 50;
 
 namespace
 {
@@ -629,11 +630,11 @@ namespace Cheats
 
 		HandleConfigRequests(settings);
 
-		{
-			std::shared_lock lock(shared.espMutex);
-			RenderEsp(shared.esp, settings);
-		}
-		RenderAim(aim);
+			{
+				std::shared_lock lock(shared.espMutex);
+				RenderEsp(shared.esp, settings);
+			}
+				RenderAim(aim);
 		if (settings.helperEnabled)
 			RenderGrenadeHelper(raw, settings);
 		else
@@ -876,10 +877,20 @@ namespace Cheats
 				continue;
 			}
 
-			newRaw.local.valid = true;
-			newRaw.local.pAddr = localAddr;
-			newRaw.local.origin = Read<Vector>(localAddr + offsets.m_vOldOrigin);
-			newRaw.local.viewOffset = Read<Vector>(localAddr + offsets.m_vecViewOffset);
+				newRaw.local.valid = true;
+				newRaw.local.pAddr = localAddr;
+				newRaw.local.origin = Read<Vector>(localAddr + offsets.m_vOldOrigin);
+				if (offsets.m_vecAbsOrigin)
+				{
+					const std::uintptr_t localSceneNode = Read<std::uintptr_t>(localAddr + offsets.m_pGameSceneNode);
+					if (localSceneNode)
+					{
+						const Vector localAbsOrigin = Read<Vector>(localSceneNode + offsets.m_vecAbsOrigin);
+						if (!localAbsOrigin.IsZero())
+							newRaw.local.origin = localAbsOrigin;
+					}
+				}
+				newRaw.local.viewOffset = Read<Vector>(localAddr + offsets.m_vecViewOffset);
 			{
 				Vector localEyeAngles = Read<Vector>(localAddr + offsets.m_angEyeAngles);
 				newRaw.local.pitch = localEyeAngles.x;
@@ -985,21 +996,6 @@ namespace Cheats
 
 				player.valid = true;
 				newRaw.players[index] = player;
-
-#ifdef _DEBUG
-				if (settings.utilVpkVisibilityParse && visRuntime && (GetAsyncKeyState(VK_F1) & 1))
-				{
-					if (!visRuntime->IsMapLoaded())
-					{
-						printf("[VisCheck] idx=%d status=MAP_NOT_READY\n", index);
-					}
-					else
-					{
-						const int visibleBone = GetFirstVisibleBoneIndex(newRaw, player);
-						printf("[VisCheck] idx=%d any_bone=%s bone=%d\n", index, visibleBone >= 0 ? "VISIBLE" : "BLOCKED", visibleBone);
-					}
-				}
-#endif
 			}
 
 			newRaw.hasLocal = true;
@@ -1046,7 +1042,11 @@ namespace Cheats
 			newEsp.showCross = settings.visCross;
 
 			const bool needBoxes = settings.utilDraw && (settings.visBox2D || settings.visBox3D || settings.visHealth || settings.visDistance);
-				const bool needBones = settings.aimEnabled || (settings.utilDraw && (settings.visBones || settings.visVisibleBones));
+			const bool needVpkAimBones =
+				settings.aimEnabled &&
+				settings.utilVisibleCheck &&
+				settings.utilVpkVisibilityParse;
+			const bool needBones = needVpkAimBones || settings.aimEnabled || (settings.utilDraw && (settings.visBones || settings.visVisibleBones));
 			const bool need3d = settings.utilDraw && settings.visBox3D;
 
 			if (raw.hasMatrix)
@@ -1105,24 +1105,47 @@ namespace Cheats
 								ep.screenBones[i] = screenBone;
 						}
 
-							if (settings.utilVisibleCheck &&
+							if (settings.utilDraw &&
+								settings.visVisibleBones &&
+								settings.utilVisibleCheck &&
 								settings.utilVpkVisibilityParse &&
 								visRuntime &&
-								visRuntime->IsMapLoaded() &&
-								(settings.aimEnabled || (settings.utilDraw && settings.visVisibleBones)))
+								visRuntime->IsMapLoaded())
 							{
-							const Vector localEye = raw.local.origin + raw.local.viewOffset;
-							for (size_t i = 0; i < kBoneCount; ++i)
-							{
-								const Vector& worldBone = rp.worldBones[i];
-								if (worldBone.IsZero())
-									continue;
+								float nearestBoneDist = std::numeric_limits<float>::max();
+								for (size_t i = 0; i < kBoneCount; ++i)
+								{
+									const Vector& screenBone = ep.screenBones[i];
+									if (screenBone.z <= 0.0f || !InScreen(settings.screen, screenBone.x, screenBone.y))
+										continue;
 
-								ep.visibleBones[i] = IsBoneVisibleWithTolerance(localEye, worldBone);
-								if (ep.visibleBones[i])
-									ep.anyVisibleBone = true;
+									const float distToCross = screenBone.CalculateDistanceToPoint2D(newEsp.cross);
+									nearestBoneDist = (std::min)(nearestBoneDist, distToCross);
+								}
+
+								if (nearestBoneDist < settings.aimbotFOV)
+								{
+									const Vector localEye = raw.local.origin + raw.local.viewOffset;
+									for (size_t i = 0; i < kBoneCount; ++i)
+									{
+										const Vector& worldBone = rp.worldBones[i];
+										if (worldBone.IsZero())
+											continue;
+
+										const Vector& screenBone = ep.screenBones[i];
+										if (screenBone.z <= 0.0f || !InScreen(settings.screen, screenBone.x, screenBone.y))
+											continue;
+
+										const float distToCross = screenBone.CalculateDistanceToPoint2D(newEsp.cross);
+										if (distToCross >= settings.aimbotFOV)
+											continue;
+
+										ep.visibleBones[i] = IsBoneVisibleCached(index, static_cast<int>(i), localEye, worldBone);
+										if (ep.visibleBones[i])
+											ep.anyVisibleBone = true;
+									}
+								}
 							}
-						}
 					}
 
 					if (need3d)
@@ -1248,14 +1271,6 @@ namespace Cheats
 							{
 								if (!visRuntime || !visRuntime->IsMapLoaded())
 									continue;
-
-									int firstVisibleBone = GetFirstVisibleBoneIndexFromEsp(rp, ep);
-									if (firstVisibleBone < 0)
-										firstVisibleBone = GetFirstVisibleBoneIndex(raw, rp);
-									if (firstVisibleBone < 0)
-										continue;
-
-								selectedAimBones[i] = firstVisibleBone;
 							}
 							else if (!rp.spotted)
 							{
@@ -1265,20 +1280,33 @@ namespace Cheats
 						if (rp.dis2LP > settings.aimbotDis * 75.0f)
 							continue;
 
+						const int baseAimBone = std::clamp(settings.aimLocation, 0, static_cast<int>(kBoneCount) - 1);
+						if (baseAimBone < 0 || baseAimBone >= static_cast<int>(kBoneCount))
+							continue;
+
+						const Vector& baseTarget = ep.screenBones[baseAimBone];
+						if (baseTarget.z <= 0.0f || !InScreen(settings.screen, baseTarget.x, baseTarget.y))
+							continue;
+
+						const float baseDist = baseTarget.CalculateDistanceToPoint2D(cross);
+						if (baseDist >= settings.aimbotFOV)
+							continue;
+
 						int selectedAimBone = selectedAimBones[i];
 						if (settings.aimSmartBoneSelection && settings.utilVpkVisibilityParse)
 						{
 							if (!visRuntime || !visRuntime->IsMapLoaded())
 								continue;
 
-							selectedAimBone = GetBestVisibleAimBoneIndex(raw, rp, ep, settings);
+							selectedAimBone = GetBestVisibleAimBoneIndex(raw, rp, ep, settings, cross, i);
 							if (selectedAimBone < 0)
 								continue;
 						}
 						else if (settings.utilVpkVisibilityParse)
 						{
-							if (selectedAimBone < 0 || selectedAimBone >= static_cast<int>(kBoneCount) || rp.worldBones[selectedAimBone].IsZero())
-								selectedAimBone = std::clamp(settings.aimLocation, 0, static_cast<int>(kBoneCount) - 1);
+							selectedAimBone = GetFirstVisibleBoneIndex(raw, rp, ep, cross, settings.aimbotFOV, i);
+							if (selectedAimBone < 0)
+								continue;
 						}
 						else if (!settings.utilVisibleCheck || !settings.utilVpkVisibilityParse)
 						{
@@ -1342,9 +1370,7 @@ namespace Cheats
 							{
 								if (visRuntime && visRuntime->IsMapLoaded())
 								{
-										int firstVisibleBone = GetFirstVisibleBoneIndexFromEsp(target, esp.players[targetIndex]);
-										if (firstVisibleBone < 0)
-											firstVisibleBone = GetFirstVisibleBoneIndex(raw, target);
+										int firstVisibleBone = GetFirstVisibleBoneIndex(raw, target, esp.players[targetIndex], cross, settings.aimbotFOV, targetIndex);
 										if (firstVisibleBone >= 0)
 											triggerShouldHold = true;
 								}
@@ -1461,22 +1487,81 @@ namespace Cheats
 		return false;
 	}
 
-	int Game::GetFirstVisibleBoneIndex(const RawState& raw, const RawPlayer& rp) const
+	bool Game::IsBoneVisibleCached(int playerIndex,
+		int boneIndex,
+		const Vector& localEye,
+		const Vector& worldBone) const
+	{
+		if (playerIndex < 0 || playerIndex >= static_cast<int>(kMaxPlayers))
+			return false;
+		if (boneIndex < 0 || boneIndex >= static_cast<int>(kBoneCount))
+			return false;
+
+		const auto nowMs = static_cast<uint64_t>(GetTickCount64());
+		constexpr float kEyeEpsilon = 1.0f;
+		constexpr float kBoneEpsilon = 1.0f;
+
+		{
+			std::lock_guard<std::mutex> lock(visCacheMutex);
+			BoneVisCacheEntry& cache = visBoneCache_[playerIndex][boneIndex];
+			if (cache.valid)
+			{
+				const bool notExpired = (nowMs - cache.timestampMs) < kVisRayIntervalMs;
+				const bool eyeStable = cache.localEye.CalcDis2Point3D(localEye) <= kEyeEpsilon;
+				const bool boneStable = cache.worldBone.CalcDis2Point3D(worldBone) <= kBoneEpsilon;
+				if (notExpired && eyeStable && boneStable)
+					return cache.visible;
+			}
+		}
+
+		const bool visible = IsBoneVisibleWithTolerance(localEye, worldBone);
+
+		{
+			std::lock_guard<std::mutex> lock(visCacheMutex);
+			BoneVisCacheEntry& cache = visBoneCache_[playerIndex][boneIndex];
+			cache.valid = true;
+			cache.visible = visible;
+			cache.timestampMs = nowMs;
+			cache.localEye = localEye;
+			cache.worldBone = worldBone;
+		}
+
+		return visible;
+	}
+
+	int Game::GetFirstVisibleBoneIndex(const RawState& raw,
+		const RawPlayer& rp,
+		const EspPlayer& ep,
+		const Vector& cross,
+		float fovRadius,
+		int playerIndex) const
 	{
 		if (!visRuntime || !visRuntime->IsMapLoaded())
+			return -1;
+
+		const float clampedFov = (std::max)(0.0f, fovRadius);
+		if (clampedFov <= 0.0f)
 			return -1;
 
 		const Vector localEye = raw.local.origin + raw.local.viewOffset;
 		for (const SmartBoneCandidate& candidate : GetSmartBonePriority())
 		{
-			if (candidate.rawBoneIndex >= rp.worldBones.size())
+			if (candidate.rawBoneIndex >= rp.worldBones.size() ||
+				candidate.rawBoneIndex >= ep.screenBones.size())
 				continue;
 
 			const Vector& worldBone = rp.worldBones[candidate.rawBoneIndex];
+			const Vector& screenBone = ep.screenBones[candidate.rawBoneIndex];
 			if (worldBone.IsZero())
 				continue;
+			if (screenBone.z <= 0.0f)
+				continue;
 
-			if (IsBoneVisibleWithTolerance(localEye, worldBone))
+			const float distToCross = screenBone.CalculateDistanceToPoint2D(cross);
+			if (distToCross >= clampedFov)
+				continue;
+
+			if (IsBoneVisibleCached(playerIndex, static_cast<int>(candidate.rawBoneIndex), localEye, worldBone))
 				return static_cast<int>(candidate.rawBoneIndex);
 		}
 
@@ -1509,14 +1594,16 @@ namespace Cheats
 	int Game::GetBestVisibleAimBoneIndex(const RawState& raw,
 		const RawPlayer& rp,
 		const EspPlayer& ep,
-		const SettingsSnapshot& settings) const
+		const SettingsSnapshot& settings,
+		const Vector& cross,
+		int playerIndex) const
 	{
 		if (!settings.utilVpkVisibilityParse || !visRuntime)
 			return -1;
 
 		int firstVisibleBone = GetFirstVisibleBoneIndexFromEsp(rp, ep);
 		if (firstVisibleBone < 0)
-			firstVisibleBone = GetFirstVisibleBoneIndex(raw, rp);
+			firstVisibleBone = GetFirstVisibleBoneIndex(raw, rp, ep, cross, settings.aimbotFOV, playerIndex);
 		if (firstVisibleBone < 0 || firstVisibleBone >= static_cast<int>(ep.screenBones.size()))
 			return -1;
 

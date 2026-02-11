@@ -3,9 +3,20 @@
 #include <algorithm>
 #include <limits>
 #include <iostream>
-#include <future>
 
-const size_t LEAF_THRESHOLD = 4;
+namespace
+{
+    constexpr size_t LEAF_THRESHOLD = 32;
+
+    inline float TriangleCentroidByAxis(const TriangleCombined& tri, int axis)
+    {
+        if (axis == 0)
+            return (tri.v0.x + tri.v1.x + tri.v2.x) * (1.0f / 3.0f);
+        if (axis == 1)
+            return (tri.v0.y + tri.v1.y + tri.v2.y) * (1.0f / 3.0f);
+        return (tri.v0.z + tri.v1.z + tri.v2.z) * (1.0f / 3.0f);
+    }
+}
 
 VisCheck::VisCheck(const std::string& optimizedGeometryFile) {
     if (!geometry.LoadFromFile(optimizedGeometryFile)) {
@@ -14,19 +25,17 @@ VisCheck::VisCheck(const std::string& optimizedGeometryFile) {
         return;
     }
 
-    std::vector<std::future<std::unique_ptr<BVHNode>>> buildTasks{};
-    buildTasks.reserve(geometry.meshes.size());
-
-    for (const auto& mesh : geometry.meshes)
+    bvhNodes.reserve(geometry.meshes.size());
+    for (auto& mesh : geometry.meshes)
     {
-        buildTasks.push_back(std::async(std::launch::async, [this, &mesh]() {
-            return BuildBVH(mesh);
-        }));
-    }
+        if (mesh.empty())
+        {
+            bvhNodes.push_back(nullptr);
+            continue;
+        }
 
-    for (auto& task : buildTasks)
-    {
-        bvhNodes.push_back(task.get());
+        auto root = BuildBVH(mesh, 0, mesh.size());
+        bvhNodes.push_back(std::move(root));
     }
 
     ready = !bvhNodes.empty();
@@ -37,12 +46,14 @@ bool VisCheck::IsReady() const
     return ready;
 }
 
-std::unique_ptr<BVHNode> VisCheck::BuildBVH(const std::vector<TriangleCombined>& tris) {
+std::unique_ptr<BVHNode> VisCheck::BuildBVH(std::vector<TriangleCombined>& tris, size_t begin, size_t end) {
     auto node = std::make_unique<BVHNode>();
 
-    if (tris.empty()) return node;
-    AABB bounds = tris[0].ComputeAABB();
-    for (size_t i = 1; i < tris.size(); ++i) {
+    if (begin >= end)
+        return node;
+
+    AABB bounds = tris[begin].ComputeAABB();
+    for (size_t i = begin + 1; i < end; ++i) {
         AABB triAABB = tris[i].ComputeAABB();
         bounds.min.x = std::min(bounds.min.x, triAABB.min.x);
         bounds.min.y = std::min(bounds.min.y, triAABB.min.y);
@@ -52,38 +63,29 @@ std::unique_ptr<BVHNode> VisCheck::BuildBVH(const std::vector<TriangleCombined>&
         bounds.max.z = std::max(bounds.max.z, triAABB.max.z);
     }
     node->bounds = bounds;
-    if (tris.size() <= LEAF_THRESHOLD) {
-        node->triangles = tris;
+
+    const size_t count = end - begin;
+    if (count <= LEAF_THRESHOLD) {
+        node->triangles = &tris;
+        node->begin = begin;
+        node->end = end;
         return node;
     }
+
     Vector3 diff = VectorSub(bounds.max, bounds.min);
     int axis = (diff.x > diff.y && diff.x > diff.z) ? 0 : ((diff.y > diff.z) ? 1 : 2);
-    std::vector<TriangleCombined> sortedTris = tris;
-    std::sort(sortedTris.begin(), sortedTris.end(), [axis](const TriangleCombined& a, const TriangleCombined& b) {
-        AABB aabbA = a.ComputeAABB();
-        AABB aabbB = b.ComputeAABB();
-        float centerA, centerB;
-        if (axis == 0) {
-            centerA = (aabbA.min.x + aabbA.max.x) / 2.0f;
-            centerB = (aabbB.min.x + aabbB.max.x) / 2.0f;
-        }
-        else if (axis == 1) {
-            centerA = (aabbA.min.y + aabbA.max.y) / 2.0f;
-            centerB = (aabbB.min.y + aabbB.max.y) / 2.0f;
-        }
-        else {
-            centerA = (aabbA.min.z + aabbA.max.z) / 2.0f;
-            centerB = (aabbB.min.z + aabbB.max.z) / 2.0f;
-        }
-        return centerA < centerB;
-        });
 
-    size_t mid = sortedTris.size() / 2;
-    std::vector<TriangleCombined> leftTris(sortedTris.begin(), sortedTris.begin() + mid);
-    std::vector<TriangleCombined> rightTris(sortedTris.begin() + mid, sortedTris.end());
+    auto beginIt = tris.begin() + static_cast<long long>(begin);
+    auto endIt = tris.begin() + static_cast<long long>(end);
+    size_t mid = begin + (count / 2);
+    auto midIt = tris.begin() + static_cast<long long>(mid);
 
-    node->left = BuildBVH(leftTris);
-    node->right = BuildBVH(rightTris);
+    std::nth_element(beginIt, midIt, endIt, [axis](const TriangleCombined& a, const TriangleCombined& b) {
+        return TriangleCentroidByAxis(a, axis) < TriangleCentroidByAxis(b, axis);
+    });
+
+    node->left = BuildBVH(tris, begin, mid);
+    node->right = BuildBVH(tris, mid, end);
 
     return node;
 }
@@ -98,7 +100,12 @@ bool VisCheck::IntersectBVH(const BVHNode* node, const Vector3& rayOrigin, const
 
     bool hit = false;
     if (node->IsLeaf()) {
-        for (const auto& tri : node->triangles) {
+        if (!node->triangles)
+            return false;
+
+        const auto& mesh = *node->triangles;
+        for (size_t i = node->begin; i < node->end; ++i) {
+            const auto& tri = mesh[i];
             float t;
             if (RayIntersectsTriangle(rayOrigin, rayDir, tri, t)) {
                 if (t < maxDistance && t < hitDistance) {
@@ -124,12 +131,12 @@ bool VisCheck::IsPointVisible(const Vector3& point1, const Vector3& point2)
     if (!ready)
         return true;
 
-    Vector3 rayDir = { point2.x - point1.x, point2.y - point1.y, point2.z - point1.z };
-    float distance = std::sqrt(VectorDot(rayDir, rayDir));
+    Vector3 rayDelta = { point2.x - point1.x, point2.y - point1.y, point2.z - point1.z };
+    float distance = std::sqrt(VectorDot(rayDelta, rayDelta));
     if (distance <= 1e-4f)
         return true;
 
-    rayDir = { rayDir.x / distance, rayDir.y / distance, rayDir.z / distance };
+    Vector3 rayDir = { rayDelta.x / distance, rayDelta.y / distance, rayDelta.z / distance };
 
     float hitDistance = std::numeric_limits<float>::max();
     for (const auto& bvhRoot : bvhNodes) {
@@ -142,6 +149,7 @@ bool VisCheck::IsPointVisible(const Vector3& point1, const Vector3& point2)
             }
         }
     }
+
     return true;
 }
 

@@ -28,22 +28,22 @@ public:
 
 	//operator 重载
 
-	constexpr const Vector& operator-(const Vector& other) const noexcept
+	constexpr Vector operator-(const Vector& other) const noexcept
 	{
 		return Vector{ x - other.x, y - other.y, z - other.z };
 	}
 
-	constexpr const Vector& operator+(const Vector& other) const noexcept
+	constexpr Vector operator+(const Vector& other) const noexcept
 	{
 		return Vector{ x + other.x, y + other.y, z + other.z };
 	}
 
-	constexpr const Vector& operator/(const float factor) const noexcept
+	constexpr Vector operator/(const float factor) const noexcept
 	{
 		return Vector{ x / factor, y / factor, z / factor };
 	}
 
-	constexpr const Vector& operator*(const float factor) const noexcept
+	constexpr Vector operator*(const float factor) const noexcept
 	{
 		return Vector{ x * factor, y * factor, z * factor };
 	}

@@ -8,7 +8,9 @@ struct BVHNode {
     AABB bounds;
     std::unique_ptr<BVHNode> left;
     std::unique_ptr<BVHNode> right;
-    std::vector<TriangleCombined> triangles;
+    const std::vector<TriangleCombined>* triangles = nullptr;
+    size_t begin = 0;
+    size_t end = 0;
 
     bool IsLeaf() const {
         return left == nullptr && right == nullptr;
@@ -28,6 +30,6 @@ private:
     OptimizedGeometry geometry;
     bool ready = false;
     std::vector<std::unique_ptr<BVHNode>> bvhNodes;
-    std::unique_ptr<BVHNode> BuildBVH(const std::vector<TriangleCombined>& tris);
+    std::unique_ptr<BVHNode> BuildBVH(std::vector<TriangleCombined>& tris, size_t begin, size_t end);
     bool IntersectBVH(const BVHNode* node, const Vector3& rayOrigin, const Vector3& rayDir, float maxDistance, float& hitDistance);
 };

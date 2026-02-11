@@ -34,7 +34,7 @@ void Menu::ShowMenu()
 	ImGui::Checkbox(u8"判断阵营", &Menu::util判断阵营);
 	ImGui::Checkbox(u8"可视检查", &Menu::util可视检查);
 	Menu::utilVPK可视解析 = true;
-	ImGui::TextDisabled(u8"VPK地图可视解析: 已强制启用");
+	ImGui::TextDisabled(u8"VPK地图可视解析已启用");
 	ImGui::TextWrapped(u8"%s", Menu::vpk可视状态.c_str());
 
 	//新建选项卡

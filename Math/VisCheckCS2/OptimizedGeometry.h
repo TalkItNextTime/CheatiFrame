@@ -5,13 +5,13 @@
 
 class OptimizedGeometry {
 public:
-    // Каждый элемент – меш (список треугольников)
+    // Каждый элемен??ме?(список треугольнико?
     std::vector<std::vector<TriangleCombined>> meshes;
 
-    // Загружает оптимизированные данные из бинарного файла .opt
+    // Загружае?оптимизированные данные из бинарног?файл?.opt
     bool LoadFromFile(const std::string& optimizedFile);
 
-    // Создаёт оптимизированный файл из сырого .vphys файла,
-    // извлекая нужные данные с помощью Parser, и сохраняет результат в optimizedFile.
+    // Создаё?оптимизированный файл из сырого .vphys файл?
+    // извлек? нужные данные ?помощь?Parser, ?сохраняет результа??optimizedFile.
     bool CreateOptimizedFile(const std::string& rawFile, const std::string& optimizedFile);
 };

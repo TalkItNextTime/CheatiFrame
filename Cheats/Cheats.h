@@ -73,19 +73,40 @@ namespace Cheats
 			size_t rawBoneIndex = 0;
 		};
 
+		struct BoneVisCacheEntry
+		{
+			bool valid = false;
+			bool visible = false;
+			uint64_t timestampMs = 0;
+			Vector localEye{};
+			Vector worldBone{};
+		};
+
 		// 返回用于智能部位选择的骨骼优先级数组（头->颈->胸->胃->骨盆->手臂）。
 		const std::array<SmartBoneCandidate, kSmartBoneCandidateCount>& GetSmartBonePriority() const;
 		// 带边缘容差的骨骼可视检测（主点失败时做偏移点补测）。
 		bool IsBoneVisibleWithTolerance(const Vector& localEye, const Vector& worldBone) const;
-		// 返回任意可视骨骼索引，若都不可视返回 -1。
-		int GetFirstVisibleBoneIndex(const RawState& raw, const RawPlayer& rp) const;
+		// 基于 50ms 频率缓存的骨骼可视检测，降低射线频率与CPU占用。
+		bool IsBoneVisibleCached(int playerIndex,
+			int boneIndex,
+			const Vector& localEye,
+			const Vector& worldBone) const;
+		// 仅在自瞄FOV范围内做射线并返回首个可视骨骼索引，若都不可视返回 -1。
+		int GetFirstVisibleBoneIndex(const RawState& raw,
+			const RawPlayer& rp,
+			const EspPlayer& ep,
+			const Vector& cross,
+			float fovRadius,
+			int playerIndex) const;
 		// 基于 ESP 线程已缓存的可视骨骼结果选择首个可视骨骼，失败返回 -1。
 		int GetFirstVisibleBoneIndexFromEsp(const RawPlayer& rp, const EspPlayer& ep) const;
 		// 根据 VPK 可视判定选择最佳骨骼索引，失败返回 -1。
 		int GetBestVisibleAimBoneIndex(const RawState& raw,
 			const RawPlayer& rp,
 			const EspPlayer& ep,
-			const SettingsSnapshot& settings) const;
+			const SettingsSnapshot& settings,
+			const Vector& cross,
+			int playerIndex) const;
 
 		// 创建并启动读取、ESP、自瞄三个工作线程。
 		void StartThreads();
@@ -186,6 +207,8 @@ namespace Cheats
 		std::condition_variable readCv{};
 		std::condition_variable espCv{};
 		std::condition_variable aimCv{};
+		mutable std::mutex visCacheMutex{};
+		mutable std::array<std::array<BoneVisCacheEntry, kBoneCount>, kMaxPlayers> visBoneCache_{};
 
 		GrenadeMapData grenadeData{};
 		std::string loadedGrenadeMap{};
