@@ -235,3 +235,4 @@ CheatiFrame/
 ![menu3](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu3.jpg)
 ![menu4](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu4.jpg)
 ![throwhelper](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/throwhelper.jpg)
+![bombEsp](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/BombESP.jpg)
