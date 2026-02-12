@@ -109,7 +109,7 @@ public:
     // Open serial port with default baud_rate, 8, n, 1
     inline bool open(int port, int baud_rate)
     {
-        if (port < 1 or port > 1024)
+        if (port < 1 || port > 1024)
             return false;
 
         set_com_port(port);
@@ -125,7 +125,7 @@ public:
     // Open serial port
     inline bool open(int port, char* set_str)
     {
-        if (port < 1 or port > 1024)
+        if (port < 1 || port > 1024)
             return false;
 
         set_com_port(port);
