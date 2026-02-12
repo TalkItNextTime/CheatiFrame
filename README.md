@@ -2,7 +2,7 @@
 
 > 基于 `ImGui + D3D11` 的外部可视化/辅助框架项目，面向 Windows 平台。
 
-线程和资源优化比较烂，主要是写实现功能作学习研究。
+线程和资源有较大优化空间，主要是写实现功能作学习研究。
 
 
 ## 免责声明
@@ -235,3 +235,4 @@ CheatiFrame/
 ![menu3](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu3.jpg)
 ![menu4](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/menu4.jpg)
 ![throwhelper](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/throwhelper.jpg)
+![bombEsp](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/BombESP.jpg)
