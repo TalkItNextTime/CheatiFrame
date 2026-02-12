@@ -238,6 +238,9 @@ CheatiFrame/
 ![bombEsp](https://github.com/TalkItNextTime/CheatiFrame/blob/CS2/pics/BombESP.jpg)
 
 ## Credit
-Read1dno [VisCheck](https://github.com/Read1dno/VisCheckCS2)
-ocornut [ImGui](https://github.com/ocornut/imgui)
-Tencent [RapidJson](https://github.com/Tencent/rapidjson)
+Read1dno [VisCheck](https://github.com/Read1dno/VisCheckCS2)  
+
+ocornut [ImGui](https://github.com/ocornut/imgui)  
+
+Tencent [RapidJson](https://github.com/Tencent/rapidjson)  
+
